@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portal Home</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
+  <style>
+    /* Tentang Kami Section */
+    .tentang-kami {
+      margin-top: 30px;
+    }
+
+    .tentang-kami h2 {
+      font-size: 30px;
+      text-align: center;
+    }
+
+    /* Grid untuk balok */
+    .konten-tentang {
+      display: block;           /* Mengubah dari grid ke block untuk satu kolom */
+      margin-top: 20px;         /* Menambah jarak antar balok */
+    }
+
+    .balok-kanan, .balok-kiri {
+      padding: 20px;
+      /* border: 1px solid #ccc; */
+      border-radius: 8px;
+      margin-bottom: 20px;      /* Menambah jarak antar balok */
+      width: 60%;
+      margin-left: auto;        /* Menempatkan balok di sebelah kanan */
+    }
+
+    .balok-kanan {
+      text-align: left;
+    }
+
+    .balok-kiri {
+      text-align: left;
+    }
+
+    .balok-kanan h3, .balok-kiri h3 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+
+    .balok-kanan p, .balok-kiri p {
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+  </style>
+</head>
+<body>
+  <!-- Latar Belakang -->
+  <div class="background-fade"></div>
+  <!-- Konten Utama -->
+  <div class="main-content">
+  <!-- Navbar Atas -->
+  <div class="navbar-top">
+    <div class="logo">
+      <img src="Properti/LOGO_RSCH.png" alt="Logo" class="logo-img" />
+      <div class="logo-text">
+        <div class="main-title">RUANG BACA VIRTUAL</div>
+        <!-- <div class="sub-title">Rumah Sakit Citra Husada</div> -->
+      </div>
+    </div>
+    <div class="top-buttons">
+      <a href="sub_beranda.html" class="jelajahi-portal">Layanan</a>
+      <a href="login.html" class="login-btn">Login</a>
+    </div>    
+  </div>
+
+  <!-- Navbar Bawah -->
+  <nav class="navbar-bottom">
+    <div class="navbar-bottom-container">
+      <ul>
+        <li><a href="1_trial.html" class="fitur-nav">Beranda</a></li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);" onclick="toggleDropdown()">Berita</a>
+          <div class="dropdown-content">
+            <a href="https://www.goal.com" target="_blank">Bola</a>
+            <a href="https://sport.detik.com/" target="_blank">Sport</a>
+            <a href="https://www.liputan6.com/showbiz" target="_blank">Showbiz</a>
+            <a href="https://www.viva.co.id/gaya-hidup" target="_blank">LifeStyle</a>
+            <a href="https://www.oto.com/berita" target="_blank">Otomotif</a>
+          </div>
+        </li>  
+        <li><a href="koleksi.html" class="fitur-nav">Koleksi</a></li>
+        <li><a href="bacaan.html" class="fitur-nav">Bacaan</a></li>
+        <!-- <li><a href="masukan.html" class="fitur-nav">Masukan</a></li> -->
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat_masuk.php">Surat Masuk</a>
+            <a href="surat_keluar.php">Surat Keluar</a>
+            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
+            <a href="surat_disposisi.php">Disposisi Surat</a>
+            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
+            <a href="surat_notif.php">Surat Notif</a>          
+            <a href="surat_pengajuan.php">Pengajuan</a>          
+            <a href="surat_internal.php">Surat Internal</a>       
+          </div>
+      </ul>
+      <div class="search-bar-bottom">
+        <input type="text" placeholder="Cari..." />
+        <button>Cari</button>
+      </div>
+    </div>
+  </nav>
+  
+    <!-- Tentang Kami Section -->
+    <section class="tentang-kami">
+      <h2>Tentang Kami</h2>
+      <div class="konten-tentang">
+        <div class="balok-kanan">
+          <h3>Visi</h3>
+          <p>Menjadi pusat informasi kesehatan terpercaya dengan akses mudah dan cepat untuk mendukung pendidikan medis, penelitian, dan peningkatan kualitas layanan kesehatan di Rumah Sakit.</p>
+        </div>
+        <div class="balok-kiri">
+          <h3>Misi</h3>
+          <p>Menyediakan akses ke koleksi digital, termasuk jurnal medis, buku, dan artikel ilmiah.
+            <br>Mengoptimalkan teknologi informasi untuk mempermudah akses dan pencarian bahan pustaka secara online.
+            <br>Menjadi wadah berbagi pengetahuan dan informasi kesehatan terkini.</p>
+        </div>
+        <div class="balok-kiri">
+            <h3>Motto</h3>
+            <p>Kesehatan Anda adalah Harapan Kami</p>
+          </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-section">
+        <h3>Tautan Lainnya</h3>
+        <ul>
+          <li><a href="faq.html" class="footer-link">FAQ</a></li>
+          <li><a href="panduan.html" class="footer-link">Panduan/Tutorial</a></li>
+          <li><a href="tentang kami.html" class="footer-link">Tentang Kami</a></li>          
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Media Sosial</h3>
+        <ul>
+          <a href="https://www.youtube.com/channel/UCWrutgBiaPK0vCk_pYxwGhw" ><i class="bx bxl-youtube sosmed-icon"></i></a>
+          <a href="https://www.facebook.com/rscitrahusadajember/" ><i class="bx bxl-facebook sosmed-icon"></i></a>
+          <a href="https://www.tiktok.com/@rscitrahusadajember?_t=ZS-8ssxXvGOz9G&_r=1" ><i class="bx bxl-tiktok sosmed-icon"></i></a>
+          <a href="https://www.instagram.com/rscitrahusadajember/" ><i class="bx bxl-instagram sosmed-icon"></i></a>
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Kontak Kami</h3>
+        <p>(+62 331) 486200 ext: 142          
+        <br>08979049176<br>
+        <p>Jalan Teratai No. 22, Patrang. Kab. Jember<br>
+        Jawa Timur, Indonesia 68117</p>
+      </div>
+    </div>
+  </footer>
+  <footer>
+    <div class="footer-bottom">
+      <p>© Copyright Humas Marketing Citra Husada.</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Update Surat Disposisi</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
+  <style>
+    .form-container {
+      background-color: #fff;
+      padding: 30px;
+      max-width: 700px;
+      margin: 40px auto;
+      border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .form-container h2 {
+      text-align: center;
+      margin-bottom: 25px;
+      color: #333;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #555;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 10px; 
+    }
+
+    .btn-simpan {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+    }
+
+    .btn-batal {
+      background-color: #6c757d;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+    }
+
+    .btn-simpan:hover {
+      background-color: #0056b3;
+    }
+
+    .btn-batal:hover {
+      background-color: #5a6268;
+    }
+  </style>
+</head>
+<body>
+  <!-- Latar Belakang -->
+  <div class="background-fade"></div>
+  <!-- Konten Utama -->
+  <div class="main-content">
+  <!-- Navbar Atas -->
+  <div class="navbar-top">
+    <div class="logo">
+      <img src="Properti/LOGO_RSCH.png" alt="Logo" class="logo-img" />
+      <div class="logo-text">
+        <div class="main-title">RUANG BACA VIRTUAL</div>
+        <!-- <div class="sub-title">Rumah Sakit Citra Husada</div> -->
+      </div>
+    </div>
+    <div class="top-buttons">
+      <a href="sub_beranda.html" class="jelajahi-portal">Layanan</a>
+      <a href="login.html" class="login-btn">Login</a>
+    </div>    
+  </div>
+
+  <!-- Navbar Bawah -->
+  <nav class="navbar-bottom">
+    <div class="navbar-bottom-container">
+      <ul>
+        <li><a href="1_trial.html" class="fitur-nav">Beranda</a></li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);" onclick="toggleDropdown()">Berita</a>
+          <div class="dropdown-content">
+            <a href="https://www.goal.com" target="_blank">Bola</a>
+            <a href="https://sport.detik.com/" target="_blank">Sport</a>
+            <a href="https://www.liputan6.com/showbiz" target="_blank">Showbiz</a>
+            <a href="https://www.viva.co.id/gaya-hidup" target="_blank">LifeStyle</a>
+            <a href="https://www.oto.com/berita" target="_blank">Otomotif</a>
+          </div>
+        </li>  
+        <li><a href="koleksi.html" class="fitur-nav">Koleksi</a></li>
+        <li><a href="bacaan.html" class="fitur-nav">Bacaan</a></li>
+        <li><a href="masukan.html" class="fitur-nav">Masukan</a></li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat masuk.html">Surat Masuk</a>
+            <a href="surat keluar.html">Surat Keluar</a>
+            <a href="disposisi.html">Disposisi</a>
+            <a href="pengajuan.html">Pengajuan</a>          
+          </div>
+      </ul>
+      <div class="search-bar-bottom">
+        <input type="text" placeholder="Cari..." />
+        <button>Cari</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="form-container">
+    <h2>✏️ Update Surat Disposisi</h2>
+    <form action="update_disposisi_proses.php" method="post">
+      <div class="form-group">
+        <label for="no_surat">No. Surat:</label>
+        <input type="text" id="no_surat" name="no_surat" value="1234/DS/2025" required>
+      </div>
+
+      <div class="form-group">
+        <label for="tanggal_surat">Tanggal Surat:</label>
+        <input type="date" id="tanggal_surat" name="tanggal_surat" value="2025-05-02" required>
+      </div>
+
+      <div class="form-group">
+        <label for="disposisi_kepada">Disposisi Kepada:</label>
+        <input type="text" id="disposisi_kepada" name="disposisi_kepada" value="Direktur" required>
+      </div>
+
+      <div class="form-group">
+        <label for="instruksi_disposisi">Instruksi Disposisi:</label>
+        <textarea id="instruksi_disposisi" name="instruksi_disposisi" rows="3" required>Segera Tindak Lanjut</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="status_disposisi">Status Disposisi:</label>
+        <select id="status_disposisi" name="status_disposisi" required>
+          <option value="">Pilih Status</option>
+          <option value="Belum Diproses">Belum Diproses</option>
+          <option value="Sedang Diproses">Sedang Diproses</option>
+          <option value="Selesai">Selesai</option>
+          <option value="Ditolak">Ditolak</option>
+        </select>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn-simpan">Simpan Perubahan</button>
+        <a href="disposisi.html" class="btn-batal">Batal</a>
+      </div>
+    </form>
+  </div>
+
+    <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-section">
+        <h3>Tautan Lainnya</h3>
+        <ul>
+          <li><a href="faq.html" class="footer-link">FAQ</a></li>
+          <li><a href="panduan.html" class="footer-link">Panduan/Tutorial</a></li>
+          <li><a href="tentang kami.html" class="footer-link">Tentang Kami</a></li>          
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Media Sosial</h3>
+        <ul>
+          <a href="https://www.youtube.com/channel/UCWrutgBiaPK0vCk_pYxwGhw" ><i class="bx bxl-youtube sosmed-icon"></i></a>
+          <a href="https://www.facebook.com/rscitrahusadajember/" ><i class="bx bxl-facebook sosmed-icon"></i></a>
+          <a href="https://www.tiktok.com/@rscitrahusadajember?_t=ZS-8ssxXvGOz9G&_r=1" ><i class="bx bxl-tiktok sosmed-icon"></i></a>
+          <a href="https://www.instagram.com/rscitrahusadajember/" ><i class="bx bxl-instagram sosmed-icon"></i></a>
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Kontak Kami</h3>
+        <p>(+62 331) 486200 ext: 142          
+        <br>08979049176<br>
+        <p>Jalan Teratai No. 22, Patrang. Kab. Jember<br>
+        Jawa Timur, Indonesia 68117</p>
+      </div>
+    </div>
+  </footer>
+  <footer>
+    <div class="footer-bottom">
+      <p>© Copyright Humas Marketing Citra Husada.</p>
+    </div>
+  </footer>
+</body>
+</html>

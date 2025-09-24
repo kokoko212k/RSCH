@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tambah Video</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
+</head>
+<style>
+/* Form Add Video */
+
+.video-form {
+  background-color: #ffffff;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  margin: 40px auto;
+  width: 100vw;
+  max-width: none;
+  position: relative;
+  left: 0;
+  right: 0;
+}
+
+.video-form h3 {
+  text-align: center;
+  margin-bottom: 30px;
+  font-size: 24px;
+  color: #2c3e50;
+}
+
+.video-form label {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 10px;
+  color: #2c3e50;
+}
+
+.video-form input,
+.video-form textarea,
+.video-form select {
+  width: 100%;
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font-size: 16px;
+}
+
+.video-form input[type="submit"] {
+  background-color: #2980b9;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 15px;
+  border-radius: 5px;
+  transition: background-color 0.3s ease;
+}
+
+.video-form input[type="submit"]:hover {
+  background-color: #3498db;
+}
+
+.video-form .form-group {
+  margin-bottom: 20px;
+}
+
+</style>
+<body>
+  <!-- Latar Belakang Blur -->
+  <div class="background-blur"></div>
+
+  <!-- Konten Utama -->
+  <div class="main-content">
+
+    <!-- Header / Navbar (Dari Portal Home) -->
+    <div class="navbar-top">
+      <div class="logo">
+        <img src="Properti/LOGO_RSCH.png" alt="Logo" class="logo-img" />
+        <div class="logo-text">
+          <div class="main-title">RUANG BACA VIRTUAL</div>
+        </div>
+      </div>
+      <div class="top-buttons">
+        <a href="sub_beranda.html" class="jelajahi-portal">Layanan</a>
+        <a href="login.html" class="login-btn">Login</a>
+      </div>    
+    </div>
+
+  <!-- Navbar Bawah -->
+  <nav class="navbar-bottom">
+    <div class="navbar-bottom-container">
+      <ul>
+        <li><a href="1_trial.html" class="fitur-nav">Beranda</a></li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);" onclick="toggleDropdown()">Berita</a>
+          <div class="dropdown-content">
+            <a href="https://www.goal.com" target="_blank">Bola</a>
+            <a href="https://sport.detik.com/" target="_blank">Sport</a>
+            <a href="https://www.liputan6.com/showbiz" target="_blank">Showbiz</a>
+            <a href="https://www.viva.co.id/gaya-hidup" target="_blank">LifeStyle</a>
+            <a href="https://www.oto.com/berita" target="_blank">Otomotif</a>
+          </div>
+        </li>  
+        <li><a href="koleksi.html" class="fitur-nav">Koleksi</a></li>
+        <li><a href="bacaan.html" class="fitur-nav">Bacaan</a></li>
+        <li><a href="masukan.html" class="fitur-nav">Masukan</a></li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat masuk.html">Surat Masuk</a>
+            <a href="surat keluar.html">Surat Keluar</a>
+            <a href="disposisi.html">Disposisi</a>
+            <a href="pengajuan.html">Pengajuan</a>  
+          </div>
+      </ul>
+      <div class="search-bar-bottom">
+        <input type="text" placeholder="Cari..." />
+        <button>Cari</button>
+      </div>
+    </div>
+  </nav>
+
+
+    <!-- Form Video -->
+    <section class="video-form">
+      <h3>Tambah Video Baru</h3>
+      <form action="tambah-video.php" method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="judul">Judul Video</label>
+            <input type="text" id="judul" name="judul" required />
+          </div>
+          <!-- <div class="form-group">
+            <label for="penulis">Penulis / Pembuat</label>
+            <input type="text" id="penulis" name="penulis" required />
+          </div>
+          <div class="form-group">
+            <label for="tanggal">Tanggal Publikasi</label>
+            <input type="date" id="tanggal" name="tanggal" required />
+          </div>
+          <div class="form-group">
+            <label for="kategori">Kategori Video</label>
+            <select id="kategori" name="kategori" required>
+              <option value="">Pilih Kategori</option>
+              <option value="Kesehatan Umum">Kesehatan Umum</option>
+              <option value="Medis & Kedokteran">Medis & Kedokteran</option>
+              <option value="Psikologi & Kesehatan Mental">Psikologi & Kesehatan Mental</option>
+              <option value="Keperawatan">Keperawatan</option>
+              <option value="Farmasi">Farmasi</option>
+            </select>
+          </div> -->
+        <div class="form-group">
+          <label for="video-file">Upload Video</label>
+          <input type="file" id="video-file" name="video_file" accept="video/*" required />
+        </div>
+        <!-- <div class="form-group">
+          <label for="thumbnail">Gambar Thumbnail</label>
+          <input type="file" id="thumbnail" name="thumbnail" accept="image/*" />
+        </div> -->
+        <div class="form-group">
+          <input type="submit" value="Tambah Video" />
+        </div>
+      </form>
+    </section>
+
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-container">
+      <div class="footer-section">
+        <h3>Tautan Lainnya</h3>
+        <ul>
+          <li><a href="faq.html" class="footer-link">FAQ</a></li>
+          <li><a href="panduan.html" class="footer-link">Panduan/Tutorial</a></li>
+          <li><a href="tentang kami.html" class="footer-link">Tentang Kami</a></li>          
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Media Sosial</h3>
+        <ul>
+          <a href="https://www.youtube.com/channel/UCWrutgBiaPK0vCk_pYxwGhw" ><i class="bx bxl-youtube sosmed-icon"></i></a>
+          <a href="https://www.facebook.com/rscitrahusadajember/" ><i class="bx bxl-facebook sosmed-icon"></i></a>
+          <a href="https://www.tiktok.com/@rscitrahusadajember?_t=ZS-8ssxXvGOz9G&_r=1" ><i class="bx bxl-tiktok sosmed-icon"></i></a>
+          <a href="https://www.instagram.com/rscitrahusadajember/" ><i class="bx bxl-instagram sosmed-icon"></i></a>
+        </ul>
+      </div>
+      <div class="footer-section">
+        <h3>Kontak Kami</h3>
+        <p>(+62 331) 486200 ext: 142          
+        <br>08979049176<br>
+        <p>Jalan Teratai No. 22, Patrang. Kab. Jember<br>
+        Jawa Timur, Indonesia 68117</p>
+      </div>
+    </div>
+  </footer>
+  <footer>
+    <div class="footer-bottom">
+      <p>© Copyright Humas Marketing Citra Husada.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

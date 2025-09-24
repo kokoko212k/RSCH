@@ -1,0 +1,31 @@
+﻿id;tanggal;no_surat;ditujukan_kepada;perihal;keterangan;image_url;file_url
+1;2021-05-04;SK/896/2024;Walikota;Perihal Surat Keluar 1;Internal;surat_keluar/images/surat_keluar_1.jpg;surat_keluar/files/surat_keluar_1.pdf
+2;2020-06-01;SK/761/2024;Direktur PT. ABC;Perihal Surat Keluar 2;Penting;surat_keluar/images/surat_keluar_2.jpg;surat_keluar/files/surat_keluar_2.pdf
+3;2022-05-18;SK/429/2024;Rektor Universitas DEF;Perihal Surat Keluar 3;Internal;surat_keluar/images/surat_keluar_3.jpg;surat_keluar/files/surat_keluar_3.pdf
+4;2023-08-09;SK/939/2024;Rektor Universitas DEF;Perihal Surat Keluar 4;Penting;surat_keluar/images/surat_keluar_4.jpg;surat_keluar/files/surat_keluar_4.pdf
+5;2022-09-20;SK/847/2024;Kepala Sekolah;Perihal Surat Keluar 5;Internal;surat_keluar/images/surat_keluar_5.jpg;surat_keluar/files/surat_keluar_5.pdf
+6;2020-09-29;SK/842/2024;Kepala Sekolah;Perihal Surat Keluar 6;Internal;surat_keluar/images/surat_keluar_6.jpg;surat_keluar/files/surat_keluar_6.pdf
+7;2020-11-15;SK/724/2024;Rektor Universitas DEF;Perihal Surat Keluar 7;Penting;surat_keluar/images/surat_keluar_7.jpg;surat_keluar/files/surat_keluar_7.pdf
+8;2020-02-27;SK/336/2024;Walikota;Perihal Surat Keluar 8;Biasa;surat_keluar/images/surat_keluar_8.jpg;surat_keluar/files/surat_keluar_8.pdf
+9;2022-03-19;SK/802/2024;Walikota;Perihal Surat Keluar 9;Biasa;surat_keluar/images/surat_keluar_9.jpg;surat_keluar/files/surat_keluar_9.pdf
+10;2020-10-03;SK/952/2024;Kepala Sekolah;Perihal Surat Keluar 10;Biasa;surat_keluar/images/surat_keluar_10.jpg;surat_keluar/files/surat_keluar_10.pdf
+11;2023-03-19;SK/113/2024;Kepala Sekolah;Perihal Surat Keluar 11;Penting;surat_keluar/images/surat_keluar_11.jpg;surat_keluar/files/surat_keluar_11.pdf
+12;2021-07-01;SK/284/2024;Kepala Sekolah;Perihal Surat Keluar 12;Internal;surat_keluar/images/surat_keluar_12.jpg;surat_keluar/files/surat_keluar_12.pdf
+13;2023-04-09;SK/112/2024;Rektor Universitas DEF;Perihal Surat Keluar 13;Biasa;surat_keluar/images/surat_keluar_13.jpg;surat_keluar/files/surat_keluar_13.pdf
+14;2022-10-24;SK/663/2024;Kepala Sekolah;Perihal Surat Keluar 14;Biasa;surat_keluar/images/surat_keluar_14.jpg;surat_keluar/files/surat_keluar_14.pdf
+15;2021-10-18;SK/684/2024;Direktur PT. ABC;Perihal Surat Keluar 15;Biasa;surat_keluar/images/surat_keluar_15.jpg;surat_keluar/files/surat_keluar_15.pdf
+16;2022-06-21;SK/974/2024;Walikota;Perihal Surat Keluar 16;Penting;surat_keluar/images/surat_keluar_16.jpg;surat_keluar/files/surat_keluar_16.pdf
+17;2020-06-18;SK/500/2024;Kepala Sekolah;Perihal Surat Keluar 17;Biasa;surat_keluar/images/surat_keluar_17.jpg;surat_keluar/files/surat_keluar_17.pdf
+18;2022-03-22;SK/555/2024;Rektor Universitas DEF;Perihal Surat Keluar 18;Penting;surat_keluar/images/surat_keluar_18.jpg;surat_keluar/files/surat_keluar_18.pdf
+19;2020-09-24;SK/149/2024;Walikota;Perihal Surat Keluar 19;Internal;surat_keluar/images/surat_keluar_19.jpg;surat_keluar/files/surat_keluar_19.pdf
+20;2023-09-11;SK/552/2024;Rektor Universitas DEF;Perihal Surat Keluar 20;Penting;surat_keluar/images/surat_keluar_20.jpg;surat_keluar/files/surat_keluar_20.pdf
+21;2021-02-02;SK/146/2024;Rektor Universitas DEF;Perihal Surat Keluar 21;Biasa;surat_keluar/images/surat_keluar_21.jpg;surat_keluar/files/surat_keluar_21.pdf
+22;2023-03-29;SK/309/2024;Rektor Universitas DEF;Perihal Surat Keluar 22;Internal;surat_keluar/images/surat_keluar_22.jpg;surat_keluar/files/surat_keluar_22.pdf
+23;2021-03-27;SK/852/2024;Direktur PT. ABC;Perihal Surat Keluar 23;Biasa;surat_keluar/images/surat_keluar_23.jpg;surat_keluar/files/surat_keluar_23.pdf
+24;2021-03-03;SK/425/2024;Kepala Sekolah;Perihal Surat Keluar 24;Internal;surat_keluar/images/surat_keluar_24.jpg;surat_keluar/files/surat_keluar_24.pdf
+25;2023-10-14;SK/807/2024;Walikota;Perihal Surat Keluar 25;Penting;surat_keluar/images/surat_keluar_25.jpg;surat_keluar/files/surat_keluar_25.pdf
+26;2020-11-18;SK/796/2024;Kepala Sekolah;Perihal Surat Keluar 26;Biasa;surat_keluar/images/surat_keluar_26.jpg;surat_keluar/files/surat_keluar_26.pdf
+27;2021-06-23;SK/918/2024;Kepala Sekolah;Perihal Surat Keluar 27;Penting;surat_keluar/images/surat_keluar_27.jpg;surat_keluar/files/surat_keluar_27.pdf
+28;2024-05-26;SK/259/2024;Walikota;Perihal Surat Keluar 28;Penting;surat_keluar/images/surat_keluar_28.jpg;surat_keluar/files/surat_keluar_28.pdf
+29;2020-09-14;SK/329/2024;Rektor Universitas DEF;Perihal Surat Keluar 29;Biasa;surat_keluar/images/surat_keluar_29.jpg;surat_keluar/files/surat_keluar_29.pdf
+30;2022-12-15;SK/858/2024;Kepala Sekolah;Perihal Surat Keluar 30;Internal;surat_keluar/images/surat_keluar_30.jpg;surat_keluar/files/surat_keluar_30.pdf

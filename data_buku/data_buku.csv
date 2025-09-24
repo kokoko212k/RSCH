@@ -1,0 +1,51 @@
+﻿id;judul;penulis;tahun;deskripsi;image_url;file_url
+1;Kisah Dua Kota;D. Sari;2017;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_1.jpg;files/book_1.pdf
+2;Jejak Sang Petualang;A. Hidayat;2003;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_2.jpg;files/book_2.pdf
+3;Cinta di Ujung Senja;B. Rahma;2011;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_3.jpg;files/book_3.pdf
+4;Kisah Dua Kota;A. Hidayat;2017;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_4.jpg;files/book_4.pdf
+5;Rahasia Langit;B. Rahma;2017;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_5.jpg;files/book_5.pdf
+6;Langkah Pertama;A. Hidayat;2008;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_6.jpg;files/book_6.pdf
+7;Perjalanan Waktu;B. Rahma;2005;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_7.jpg;files/book_7.pdf
+8;Perjalanan Waktu;A. Hidayat;2004;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_8.jpg;files/book_8.pdf
+9;Misteri Hutan;B. Rahma;2016;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_9.jpg;files/book_9.pdf
+10;Hujan di Musim Dingin;A. Hidayat;2019;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_10.jpg;files/book_10.pdf
+11;Langkah Pertama;D. Sari;2012;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_11.jpg;files/book_11.pdf
+12;Kisah Dua Kota;B. Rahma;2011;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_12.jpg;files/book_12.pdf
+13;Rahasia Langit;D. Sari;2015;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_13.jpg;files/book_13.pdf
+14;Jejak Sang Petualang;D. Sari;2008;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_14.jpg;files/book_14.pdf
+15;Rahasia Langit;A. Hidayat;2012;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_15.jpg;files/book_15.pdf
+16;Hujan di Musim Dingin;A. Hidayat;2017;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_16.jpg;files/book_16.pdf
+17;Langkah Pertama;D. Sari;2011;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_17.jpg;files/book_17.pdf
+18;Jejak Sang Petualang;A. Hidayat;2001;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_18.jpg;files/book_18.pdf
+19;Hujan di Musim Dingin;D. Sari;2010;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_19.jpg;files/book_19.pdf
+20;Kisah Dua Kota;C. Nugroho;2019;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_20.jpg;files/book_20.pdf
+21;Jejak Sang Petualang;A. Hidayat;2010;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_21.jpg;files/book_21.pdf
+22;Misteri Hutan;D. Sari;2012;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_22.jpg;files/book_22.pdf
+23;Kisah Dua Kota;C. Nugroho;2008;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_23.jpg;files/book_23.pdf
+24;Perjalanan Waktu;B. Rahma;2008;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_24.jpg;files/book_24.pdf
+25;Jejak Sang Petualang;B. Rahma;2022;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_25.jpg;files/book_25.pdf
+26;Langkah Pertama;C. Nugroho;2019;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_26.jpg;files/book_26.pdf
+27;Hujan di Musim Dingin;D. Sari;2006;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_27.jpg;files/book_27.pdf
+28;Perjalanan Waktu;B. Rahma;2002;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_28.jpg;files/book_28.pdf
+29;Kisah Dua Kota;B. Rahma;2012;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_29.jpg;files/book_29.pdf
+30;Misteri Hutan;D. Sari;2000;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_30.jpg;files/book_30.pdf
+31;Perjalanan Waktu;B. Rahma;2015;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_31.jpg;files/book_31.pdf
+32;Langkah Pertama;A. Hidayat;2021;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_32.jpg;files/book_32.pdf
+33;Jejak Sang Petualang;C. Nugroho;2003;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_33.jpg;files/book_33.pdf
+34;Langkah Pertama;C. Nugroho;2002;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_34.jpg;files/book_34.pdf
+35;Rahasia Langit;D. Sari;2022;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_35.jpg;files/book_35.pdf
+36;Kisah Dua Kota;D. Sari;2000;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_36.jpg;files/book_36.pdf
+37;Langkah Pertama;A. Hidayat;2013;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_37.jpg;files/book_37.pdf
+38;Kisah Dua Kota;B. Rahma;2001;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_38.jpg;files/book_38.pdf
+39;Cinta di Ujung Senja;C. Nugroho;2023;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_39.jpg;files/book_39.pdf
+40;Cinta di Ujung Senja;C. Nugroho;2021;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_40.jpg;files/book_40.pdf
+41;Kisah Dua Kota;C. Nugroho;2004;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_41.jpg;files/book_41.pdf
+42;Rahasia Langit;C. Nugroho;2010;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_42.jpg;files/book_42.pdf
+43;Hujan di Musim Dingin;C. Nugroho;2005;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_43.jpg;files/book_43.pdf
+44;Langkah Pertama;C. Nugroho;2018;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_44.jpg;files/book_44.pdf
+45;Jejak Sang Petualang;A. Hidayat;2019;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_45.jpg;files/book_45.pdf
+46;Jejak Sang Petualang;D. Sari;2011;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_46.jpg;files/book_46.pdf
+47;Hujan di Musim Dingin;A. Hidayat;2006;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_47.jpg;files/book_47.pdf
+48;Misteri Hutan;D. Sari;2000;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_48.jpg;files/book_48.pdf
+49;Hujan di Musim Dingin;C. Nugroho;2002;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_49.jpg;files/book_49.pdf
+50;Perjalanan Waktu;C. Nugroho;2009;Buku ini mengisahkan tentang perjalanan hidup, tantangan, dan harapan.;images/book_50.jpg;files/book_50.pdf

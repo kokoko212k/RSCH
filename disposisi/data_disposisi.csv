@@ -1,0 +1,31 @@
+﻿id;tanggal;no_surat;asal_pengajuan;ditujukan_kepada;instruksi;status;image_url;file_url
+1;2023-05-07;DS/230/2024;Bagian Kepegawaian;Sekretaris;Segera ditindaklanjuti;Selesai;disposisi/images/disposisi_1.jpg;disposisi/files/disposisi_1.pdf
+2;2023-12-11;DS/183/2024;Bagian Umum;Sekretaris;Segera ditindaklanjuti;Selesai;disposisi/images/disposisi_2.jpg;disposisi/files/disposisi_2.pdf
+3;2022-12-04;DS/990/2024;Bagian Umum;Direktur Utama;Diperiksa ulang;Selesai;disposisi/images/disposisi_3.jpg;disposisi/files/disposisi_3.pdf
+4;2021-01-04;DS/273/2024;Bagian Umum;Sekretaris;Diperiksa ulang;Selesai;disposisi/images/disposisi_4.jpg;disposisi/files/disposisi_4.pdf
+5;2021-03-13;DS/729/2024;Bagian Kepegawaian;Direktur Utama;Diperiksa ulang;Dibatalkan;disposisi/images/disposisi_5.jpg;disposisi/files/disposisi_5.pdf
+6;2023-07-04;DS/820/2024;Bagian Keuangan;Direktur Utama;Diperiksa ulang;Dalam Proses;disposisi/images/disposisi_6.jpg;disposisi/files/disposisi_6.pdf
+7;2021-04-11;DS/427/2024;Bagian Umum;Kepala Bagian;Diperiksa ulang;Dibatalkan;disposisi/images/disposisi_7.jpg;disposisi/files/disposisi_7.pdf
+8;2021-06-19;DS/574/2024;Bagian Keuangan;Direktur Utama;Segera ditindaklanjuti;Dibatalkan;disposisi/images/disposisi_8.jpg;disposisi/files/disposisi_8.pdf
+9;2022-11-09;DS/483/2024;Bagian Keuangan;Direktur Utama;Diperiksa ulang;Dalam Proses;disposisi/images/disposisi_9.jpg;disposisi/files/disposisi_9.pdf
+10;2022-07-09;DS/564/2024;Bagian Keuangan;Sekretaris;Diperiksa ulang;Dibatalkan;disposisi/images/disposisi_10.jpg;disposisi/files/disposisi_10.pdf
+11;2022-12-26;DS/761/2024;Bagian Kepegawaian;Sekretaris;Diperiksa ulang;Dalam Proses;disposisi/images/disposisi_11.jpg;disposisi/files/disposisi_11.pdf
+12;2022-09-12;DS/359/2024;Bagian Kepegawaian;Sekretaris;Segera ditindaklanjuti;Dibatalkan;disposisi/images/disposisi_12.jpg;disposisi/files/disposisi_12.pdf
+13;2022-01-31;DS/967/2024;Bagian Umum;Sekretaris;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_13.jpg;disposisi/files/disposisi_13.pdf
+14;2022-06-26;DS/122/2024;Bagian Umum;Kepala Bagian;Diperiksa ulang;Selesai;disposisi/images/disposisi_14.jpg;disposisi/files/disposisi_14.pdf
+15;2022-06-19;DS/320/2024;Bagian Keuangan;Kepala Bagian;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_15.jpg;disposisi/files/disposisi_15.pdf
+16;2024-05-13;DS/233/2024;Bagian Umum;Sekretaris;Segera ditindaklanjuti;Dibatalkan;disposisi/images/disposisi_16.jpg;disposisi/files/disposisi_16.pdf
+17;2022-01-24;DS/825/2024;Bagian Umum;Sekretaris;Diproses sesuai prosedur;Selesai;disposisi/images/disposisi_17.jpg;disposisi/files/disposisi_17.pdf
+18;2023-11-12;DS/202/2024;Bagian Keuangan;Sekretaris;Diproses sesuai prosedur;Selesai;disposisi/images/disposisi_18.jpg;disposisi/files/disposisi_18.pdf
+19;2024-05-09;DS/710/2024;Bagian Umum;Kepala Bagian;Diproses sesuai prosedur;Dalam Proses;disposisi/images/disposisi_19.jpg;disposisi/files/disposisi_19.pdf
+20;2023-09-12;DS/694/2024;Bagian Kepegawaian;Direktur Utama;Diproses sesuai prosedur;Dalam Proses;disposisi/images/disposisi_20.jpg;disposisi/files/disposisi_20.pdf
+21;2020-04-29;DS/363/2024;Bagian Kepegawaian;Sekretaris;Segera ditindaklanjuti;Dalam Proses;disposisi/images/disposisi_21.jpg;disposisi/files/disposisi_21.pdf
+22;2020-08-12;DS/614/2024;Bagian Kepegawaian;Kepala Bagian;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_22.jpg;disposisi/files/disposisi_22.pdf
+23;2023-06-21;DS/123/2024;Bagian Kepegawaian;Direktur Utama;Segera ditindaklanjuti;Dalam Proses;disposisi/images/disposisi_23.jpg;disposisi/files/disposisi_23.pdf
+24;2021-04-27;DS/750/2024;Bagian Umum;Kepala Bagian;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_24.jpg;disposisi/files/disposisi_24.pdf
+25;2023-04-03;DS/787/2024;Bagian Keuangan;Direktur Utama;Diperiksa ulang;Selesai;disposisi/images/disposisi_25.jpg;disposisi/files/disposisi_25.pdf
+26;2023-11-15;DS/843/2024;Bagian Kepegawaian;Direktur Utama;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_26.jpg;disposisi/files/disposisi_26.pdf
+27;2021-08-17;DS/598/2024;Bagian Kepegawaian;Direktur Utama;Diperiksa ulang;Dalam Proses;disposisi/images/disposisi_27.jpg;disposisi/files/disposisi_27.pdf
+28;2024-05-26;DS/968/2024;Bagian Kepegawaian;Direktur Utama;Segera ditindaklanjuti;Dalam Proses;disposisi/images/disposisi_28.jpg;disposisi/files/disposisi_28.pdf
+29;2023-09-07;DS/844/2024;Bagian Keuangan;Kepala Bagian;Diproses sesuai prosedur;Selesai;disposisi/images/disposisi_29.jpg;disposisi/files/disposisi_29.pdf
+30;2022-09-11;DS/195/2024;Bagian Keuangan;Sekretaris;Diproses sesuai prosedur;Dibatalkan;disposisi/images/disposisi_30.jpg;disposisi/files/disposisi_30.pdf
