@@ -10,16 +10,13 @@ if (!isset($_SESSION['user'])) {
 
 // ambil konteks user
 $user        = $_SESSION['user'];
-$user_nik    = $user['nik']    ?? null;   // <-- pakai NIK
+$user_nik    = $user['nik']    ?? null;   // pakai NIK
 $user_nama   = $user['nama']   ?? '';
 $user_status = $user['status'] ?? '';
 
 // dipakai navbar
 $role = $user_status;
 $can_access_eoffice = in_array($role, ['Super Admin']);
-
-// (opsional) jika butuh label lawan di UI non-form
-$penerima_label = ($user_status === 'Super Admin') ? 'Sekretariat' : 'Super Admin';
 
 // ambil parameter surat
 $no_surat = $_GET['no_surat'] ?? ($_GET['id'] ?? null);
@@ -37,17 +34,17 @@ if ($pdo->getAttribute(PDO::ATTR_ERRMODE) !== PDO::ERRMODE_EXCEPTION) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_pesan_id'])) {
     $hapusId      = (int) ($_POST['hapus_pesan_id'] ?? 0);
     $hapusNoSurat = $_POST['no_surat'] ?? '';
+    $user_unit  = $user['unit'] ?? '';
 
-    // cek kepemilikan pesan (pakai NIK, fallback pengirim lama)
-    $stmtCheck = $pdo->prepare("SELECT pengirim_nik, pengirim FROM pesan WHERE id = ?");
+    $stmtCheck = $pdo->prepare("SELECT pengirim_nik, pengirim_unit FROM pesan WHERE id = ?");
     $stmtCheck->execute([$hapusId]);
     $own = $stmtCheck->fetch(PDO::FETCH_ASSOC);
 
     $bolehHapus = false;
     if (!empty($own['pengirim_nik']) && !empty($user_nik)) {
-        $bolehHapus = ($own['pengirim_nik'] === $user_nik);
+      $bolehHapus = ($own['pengirim_nik'] === $user_nik);
     } else {
-        $bolehHapus = ($own['pengirim'] === $user_status || $own['pengirim'] === $user_nama);
+      $bolehHapus = (trim($own['pengirim_unit']) === trim($user_unit)); // <-- bandingkan unit
     }
 
     if ($bolehHapus) {
@@ -93,9 +90,26 @@ if (!$no_surat) {
 }
 
 // --- ambil pesan (per no_surat)
-$stmt = $pdo->prepare("SELECT * FROM pesan WHERE no_surat = ? ORDER BY waktu ASC");
-$stmt->execute([$no_surat]);
+$stmt = $pdo->prepare("
+  SELECT *
+  FROM pesan
+  WHERE no_surat = ?
+    AND (penerima_nik = ? OR pengirim_nik = ?)
+  ORDER BY waktu ASC
+");
+$stmt->execute([$no_surat, $user_nik, $user_nik]);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+// --- ambil info disposisi_kepada untuk ditampilkan (opsional)
+$pref_status = null;
+try {
+    $qPref = $pdo->prepare("SELECT disposisi_kepada FROM surat_disposisi_tindak_lanjut WHERE no_surat = ? ORDER BY id_tindaklanjut DESC LIMIT 1");
+    $qPref->execute([$no_surat]);
+    $pref_status = trim((string)$qPref->fetchColumn()) ?: null;
+} catch (Throwable $e) {
+    $pref_status = null;
+}
 
 // --- JIKA AJAX: hanya render bubble chat & keluar
 if ($isAjax) {
@@ -104,19 +118,22 @@ if ($isAjax) {
         exit;
     }
 
+    $printed = [];
     foreach ($rows as $row) {
-        // tentukan apakah ini pesan saya -> pakai NIK, fallback legacy
-        $isSender = false;
-        if (!empty($row['pengirim_nik']) && !empty($user_nik)) {
-            $isSender = ($row['pengirim_nik'] === $user_nik);
-        } else {
-            $isSender = ($row['pengirim'] === $user_status || $row['pengirim'] === $user_nama);
+        $isSender = (!empty($row['pengirim_nik']) && $row['pengirim_nik'] === $user_nik);
+
+        // kunci dedupe: pengirim + isi + detik waktunya
+        $key = ($row['pengirim_nik'] ?? '').'|'.trim($row['pesan'] ?? '').'|'.substr($row['waktu'] ?? '', 0, 19);
+
+        if ($isSender) {
+            if (isset($printed[$key])) continue; // skip duplikat untuk semua penerima
+            $printed[$key] = true;
         }
 
         $bubbleClass = $isSender ? 'chat-bubble right' : 'chat-bubble left';
 
         // label pengirim: pakai pengirim_nama (baru), fallback ke pengirim (lama)
-        $labelSrc = $row['pengirim_nama'] ?? $row['pengirim'] ?? '';
+        $labelSrc = $row['pengirim_nama'] ?? $row['pengirim_unit'] ?? '';
         $label    = $isSender ? 'Anda' : htmlspecialchars($labelSrc, ENT_QUOTES, 'UTF-8');
 
         $pesanTxt  = trim($row['pesan'] ?? '');
@@ -125,7 +142,7 @@ if ($isAjax) {
         ?>
         <div class="<?= $bubbleClass ?>">
             <strong><?= $label ?></strong><br>
-            <div class="chat-text"><b>Pesan:</b> <?= $pesanSafe ?></div>
+            <div class="chat-text"><?= $pesanSafe ?></div>
             <div class="chat-time"><?= $waktu ?></div>
 
             <?php if ($isSender): ?>
@@ -134,16 +151,13 @@ if ($isAjax) {
                 <input type="hidden" name="no_surat" value="<?= htmlspecialchars($no_surat, ENT_QUOTES, 'UTF-8') ?>">
                 <button type="submit" style="background:none;border:none;color:red;cursor:pointer;">🗑️</button>
               </form>
-              <button
-                onclick="editPesan(<?= (int)$row['id'] ?>, '<?= htmlspecialchars($row['pesan'] ?? '', ENT_QUOTES, 'UTF-8') ?>')"
-                style="background:none;border:none;color:blue;cursor:pointer;">
-                ✏️
-              </button>
+              <!-- tombol edit opsional: pastikan ada fungsi editPesan() kalau mau diaktifkan -->
+              <!-- <button onclick="editPesan(<?= (int)$row['id'] ?>, '<?= htmlspecialchars($row['pesan'] ?? '', ENT_QUOTES, 'UTF-8') ?>')" style="background:none;border:none;color:blue;cursor:pointer;">✏️</button> -->
             <?php endif; ?>
         </div>
         <?php
     }
-    exit; 
+    exit;
 }
 ?>
 <!DOCTYPE html>
@@ -470,31 +484,34 @@ if ($isAjax) {
     </div>
   </nav>
 
-  <!-- Judul di luar kontainer -->
-  <h2 class="judul-surat-luar">Disposisi Tindak Lanjut</h2>
-
-  <div class="kontainer-balok">
-    <div class="balok-1">
+    <!-- <div class="balok-1">
       <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
-    </div>
+    </div> -->
 
-    <div class="balok-2">
+    <!-- <div class="balok-2">
       <div class="search-bar">
         <input type="text" placeholder="..." id="searchInput" oninput="searchTable()" />
         <button>Cari</button>
       </div>
-    </div>
+    </div> -->
 
+  <h2 class="judul-surat-luar">Disposisi Tindak Lanjut</h2>
+
+  <div class="kontainer-balok">
     <div class="wrap">
       <div class="head">
         <a href="surat_disposisi_tindak_lanjut.php">← Kembali</a>
         <h2 style="margin:0">Chat: <?= htmlspecialchars($no_surat, ENT_QUOTES) ?></h2>
       </div>
 
+      <?php if ($pref_status): ?>
+        <div class="notif info">Pesan akan dikirim ke semua user berstatus: <b><?= htmlspecialchars($pref_status) ?></b></div>
+      <?php endif; ?>
+
       <div class="card">
         <div id="chatBox" class="chat-box"><div style="opacity:.6">Memuat...</div></div>
 
-        <!-- Hidden pengirim/penerima DIHAPUS. Server yang tentukan. -->
+        <!-- Form kirim SEDERHANA: hanya no_surat + pesan -->
         <form id="formSend" class="send" method="post" action="pesan_buat.php">
           <input type="hidden" name="no_surat" value="<?= htmlspecialchars($no_surat, ENT_QUOTES) ?>">
           <textarea name="pesan" placeholder="Ketik pesan..." required></textarea>
@@ -503,6 +520,8 @@ if ($isAjax) {
       </div>
     </div>
   </div>
+
+
 
   <!-- Footer -->
   <footer>
@@ -538,7 +557,7 @@ if ($isAjax) {
         Jawa Timur, Indonesia 68117</p>
       </div>
     </div>
-  </footer>
+    </footer>
   <footer>
     <div class="footer-bottom">
       <p>© Copyright Humas Marketing Citra Husada.</p>
@@ -581,6 +600,26 @@ if ($isAjax) {
 
   setInterval(loadChat, 10000);
   loadChat();
+
+  function updateToVisibility() {
+    const type = document.querySelector('input[name="to_type"]:checked')?.value || 'status';
+    const elStatus = document.getElementById('toStatus');
+    const elNama   = document.getElementById('toNama');
+    if (type === 'status') {
+      elStatus.style.display = '';
+      elNama.style.display   = 'none';
+    } else {
+      elStatus.style.display = 'none';
+      elNama.style.display   = '';
+    }
+  }
+  document.querySelectorAll('input[name="to_type"]').forEach(r => {
+    r.addEventListener('change', updateToVisibility);
+  });
+  // Prefill: jika ada $pref_status, default tetap "status"
+  updateToVisibility();
+
+
   </script>
 </body>
 </html>

@@ -8,7 +8,7 @@ function h(?string $s): string {
 }
 
 
-// date_default_timezone_set('Asia/Jakarta');
+date_default_timezone_set('Asia/Jakarta');
 $tanggal_hari_ini = date('Y-m-d');
 
 if (!isset($_SESSION['user'])) {
@@ -18,40 +18,8 @@ if (!isset($_SESSION['user'])) {
 
 $user = $_SESSION['user'];
 $role = $user['status'] ?? null;
-$eofficeAll = [
-  'surat_masuk.php'                   => 'Surat Masuk',
-  'surat_keluar.php'                  => 'Surat Keluar',
-  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
-  'surat_disposisi.php'               => 'Disposisi Surat',
-  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
-  'surat_notif.php'                   => 'Surat Notif',
-  'surat_pengajuan.php'               => 'Pengajuan',
-];
+$can_access_eoffice = in_array($role, ['Super Admin', 'Direktur']);
 
-$rolePages = [
-  'Super Admin' => array_keys($eofficeAll), // semua
-  'Sekretariat' => [
-    'surat_masuk.php',
-    'surat_keluar.php',
-    'surat_disposisi_pengajuan.php',
-  ],
-  'Direktur' => [
-    'surat_disposisi.php',
-    'surat_notif.php',
-  ],
-  'Admin' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-  'Member' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-];
-
-// Tentukan halaman yang boleh tampil untuk role saat ini
-$allowedEofficePages = $rolePages[$role] ?? [];
-$can_access_eoffice  = !empty($allowedEofficePages);
 $pdo->prepare("
     UPDATE surat_masuk 
     SET tanggal_diterima = :tanggal 
@@ -75,33 +43,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_SESSION['flash'])) {
 
 unset($_SESSION['buka_disposisi']);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_note'], $_POST['id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_keterangan'], $_POST['id'])) {
     header('Content-Type: text/plain; charset=utf-8');
     $id  = (int) $_POST['id'];
-    $note = trim(substr($_POST['note'] ?? '', 0, 255));
+    $ket = trim(substr($_POST['keterangan'] ?? '', 0, 255));
 
-    $pdo->prepare("UPDATE surat_disposisi SET note = :note WHERE id = :id")
-        ->execute(['note' => $note, 'id' => $id]);
-
-    // sinkron ke surat_masuk / surat_keluar via file_url
-    $surat = $pdo->prepare("SELECT file_url FROM surat_disposisi WHERE id = :id");
-    $surat->execute(['id' => $id]);
-    $file = $surat->fetchColumn();
-
-    if ($file) {
-        $pdo->prepare("UPDATE surat_masuk  SET note = :note WHERE file_url = :file_url")->execute(['note'=>$note,'file_url'=>$file]);
-        $pdo->prepare("UPDATE surat_keluar SET note = :note WHERE file_url = :file_url")->execute(['note'=>$note,'file_url'=>$file]);
-    }
+    $pdo->prepare("UPDATE surat_disposisi SET keterangan = :ket WHERE id = :id")
+        ->execute(['ket' => $ket, 'id' => $id]);
 
     echo 'ok';
     exit();
-
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['instruksi'], $_POST['id'])) {
     $id = (int) $_POST['id'];
     $instruksi = trim($_POST['instruksi'] ?? '');
-    $note = trim(substr($_POST['note'] ?? '', 0, 255));
+    $keterangan = trim(substr($_POST['keterangan'] ?? '', 0, 255));
     $tanggal_disposisi = $tanggal_hari_ini;
 
     if ($id > 0) {
@@ -114,24 +71,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['instruksi'], $_POST['
             $file_url = $dataSurat['file_url'];
             $no_surat = $dataSurat['no_surat'];
 
-            // kalau instruksi kosong, jangan ubah instruksi; hanya simpan note
+            // kalau instruksi kosong, jangan ubah instruksi; hanya simpan keterangan
             if ($instruksi === '') {
-                $pdo->prepare("UPDATE surat_disposisi SET note = :note WHERE id = :id")
-                    ->execute(['note' => $note, 'id' => $id]);
+                $pdo->prepare("UPDATE surat_disposisi SET keterangan = :ket WHERE id = :id")
+                    ->execute(['ket' => $keterangan, 'id' => $id]);
                 echo 'success';
                 exit();
             }
 
-            // update instruksi + note
+            // update instruksi + keterangan
             $pdo->prepare("
                 UPDATE surat_disposisi 
                 SET instruksi = :instruksi,
-                    note = :note,
+                    keterangan = :ket,
                     status_disposisi = 'Telah Diproses'
                 WHERE id = :id
             ")->execute([
                 'instruksi' => $instruksi,
-                'note'       => $note,
+                'ket'       => $keterangan,
                 'id'        => $id
             ]);
 
@@ -139,11 +96,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['instruksi'], $_POST['
             foreach (['surat_masuk', 'surat_keluar'] as $table) {
                 $pdo->prepare("UPDATE $table SET instruksi = :instruksi WHERE file_url = :file_url")
                     ->execute(['instruksi' => $instruksi, 'file_url' => $file_url]);
-            }
-
-            foreach (['surat_masuk','surat_keluar'] as $table) {
-                $pdo->prepare("UPDATE $table SET instruksi = :instruksi WHERE file_url = :file_url")
-                    ->execute(['note'=>$note,'f'=>$file_url]);
             }
 
             if (strcasecmp($instruksi, 'Diteruskan') === 0) {
@@ -249,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cari_surat'])) {
         }
     }
 
-    // ✅ kalau noteemu salah satu sumber surat, simpan ke disposisi
+    // ✅ kalau ketemu salah satu sumber surat, simpan ke disposisi
     if ($tanggal !== '') {
         $stmt = $pdo->prepare("
             INSERT INTO surat_disposisi (tanggal, no_surat, ditujukan_kepada, instruksi, status_disposisi, file_url) 
@@ -650,40 +602,6 @@ $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
     padding: 5px;
 }
 
-/* kolom Note rapi dan tombol tidak ketimpa */
-.note-cell { min-width: 360px; }                 /* kasih lebar minimum kolom Note */
-.note-wrap {
-  display: grid;                                  /* grid lebih stabil di dalam <table> */
-  grid-template-columns: 1fr auto;                /* textarea | tombol */
-  gap: 8px;
-  align-items: start;
-}
-.note-wrap textarea {
-  width: 100%;                                    /* isi kolom yang tersedia */
-  min-height: 60px;
-  resize: vertical;
-  box-sizing: border-box;
-}
-.btn-save-note {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  background: #3f98f7ff;
-  color: #fff;
-  white-space: nowrap;                            /* teks tombol tidak terpotong */
-  cursor: pointer;
-}
-.btn-save-note[disabled] { opacity: .5; cursor: not-allowed; }
-
-.note-status { font-size: 12px; color: rgba(44, 61, 243, 1); display: inline-block; margin-top: 4px; }
-
-/* Responsif: kalau layar sempit, tumpuk ke bawah */
-@media (max-width: 768px) {
-  .note-cell { min-width: 240px; }
-  .note-wrap { grid-template-columns: 1fr; }      /* textarea di atas, tombol di bawah */
-  .btn-save-note { width: 100%; }
-}
-
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -740,14 +658,19 @@ $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-          <li class="dropdown">
-            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-            <div class="dropdown-content">
-              <?php foreach ($allowedEofficePages as $href): ?>
-                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
-              <?php endforeach; ?>
-            </div>
-          </li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat_masuk.php">Surat Masuk</a>
+            <a href="surat_keluar.php">Surat Keluar</a>
+            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
+            <a href="surat_disposisi.php">Disposisi Surat</a>
+            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
+            <a href="surat_notif.php">Surat Notif</a>          
+            <a href="surat_pengajuan.php">Pengajuan</a>          
+            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
+          </div>
+        </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -791,7 +714,7 @@ $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
                           </select>
                       </div>
                   </th>
-                  <th>Note</th>
+                  <th>Keterangan</th>
                   <th>Status</th>
                   <th>File</th>
                   <th>Aksi</th>
@@ -813,24 +736,13 @@ $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
                           <option value="Ditolak" <?= $row['instruksi'] == 'Ditolak' ? 'selected' : '' ?>>Ditolak</option>
                       </select>
                   </td>
-                  <td class="note-cell">
-                    <div class="note-wrap">
-                      <textarea
-                        id="note-<?= (int)$row['id'] ?>"
-                        placeholder="Ketik note..."
-                        oninput="toggleSaveBtn(<?= (int)$row['id'] ?>)"
-                        data-original="<?= h($row['note'] ?? '') ?>"
-                      ><?= h($row['note'] ?? '') ?></textarea>
-
-                      <button
-                        id="btn-save-<?= (int)$row['id'] ?>"
-                        type="button"
-                        class="btn-save-note"
-                        onclick="saveNote(<?= (int)$row['id'] ?>)"
-                        disabled
-                      >Simpan</button>
-                    </div>
-                    <span id="note-status-<?= (int)$row['id'] ?>" class="note-status"></span>
+                  <td>
+                    <textarea
+                      id="ket-<?= $row['id'] ?>"
+                      placeholder="Tulis keterangan..."
+                      onblur="saveKet(<?= (int)$row['id'] ?>, this.value)"
+                      style="width:220px; min-height:60px; resize:vertical;"
+                    ><?= h($row['keterangan'] ?? '') ?></textarea>
                   </td>
                   <td id="status-<?= $row['id'] ?>"><?= htmlspecialchars($row['status_disposisi']) ?></td>
                   <td><a href="<?= $row['file_url'] ?>" target="_blank"><?= basename($row['file_url']) ?></a></td>
@@ -880,7 +792,7 @@ $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Citra Husada.</p>
+      <p>© Copyright Humas Marketing Citra Husada.</p>
     </div>
   </footer>
   <script>
@@ -969,7 +881,7 @@ function exportTableToExcel() {
       { wch: 15 }, // No. Surat
       { wch: 30 }, // Ditujukan Kepada
       { wch: 15 }, // Instruksi
-      { wch: 50 }, // note
+      { wch: 50 }, // Keterangan
       { wch: 15 }, // Status
     ];
 
@@ -1058,11 +970,11 @@ function exportTableToExcel() {
 //     });
 // }
 
-function saveKet(id, note) {
+function saveKet(id, ket) {
   fetch('surat_disposisi.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `save_note=1&id=${encodeURIComponent(id)}&note=${encodeURIComponent(note || '')}`
+    body: `save_keterangan=1&id=${encodeURIComponent(id)}&keterangan=${encodeURIComponent(ket || '')}`
   })
   .then(r => r.text())
   .then(t => {
@@ -1070,19 +982,19 @@ function saveKet(id, note) {
     if (clean === 'ok' || clean === 'success') return;
     throw new Error(clean || 'unknown');
   })
-  .catch(err => alert('Gagal menyimpan note: ' + err.message));
+  .catch(err => alert('Gagal menyimpan keterangan: ' + err.message));
 }
 
 
 function updateInstruksi(id, instruksi) {
-  // Ambil note terkini di input yang sama baris
-  const noteEl = document.getElementById('note-' + id);
-  const note   = noteEl ? noteEl.value : '';
+  // Ambil keterangan terkini di input yang sama baris
+  const ketEl = document.getElementById('ket-' + id);
+  const ket   = ketEl ? ketEl.value : '';
 
   fetch('surat_disposisi.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `id=${encodeURIComponent(id)}&instruksi=${encodeURIComponent(instruksi)}&note=${encodeURIComponent(note)}`
+      body: `id=${encodeURIComponent(id)}&instruksi=${encodeURIComponent(instruksi)}&keterangan=${encodeURIComponent(ket)}`
   })
   .then(response => response.text())
   .then(data => {
@@ -1102,59 +1014,7 @@ function updateInstruksi(id, instruksi) {
   });
 }
 
-function toggleSaveBtn(id){
-  const ta  = document.getElementById('note-' + id);
-  const btn = document.getElementById('btn-save-' + id);
-  if (!ta || !btn) return;
-  btn.disabled = (ta.value === (ta.dataset.original ?? ''));
-}
 
-function saveNote(id){
-  const ta     = document.getElementById('note-' + id);
-  const btn    = document.getElementById('btn-save-' + id);
-  const status = document.getElementById('note-status-' + id);
-  if (!ta || !btn) return;
-
-  const val = (ta.value || '').slice(0, 255); // batasi 255 char (sesuai server)
-  btn.disabled = true;
-  const oldText = btn.textContent;
-  btn.textContent = 'Menyimpan...';
-
-  fetch('surat_disposisi.php', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `save_note=1&id=${encodeURIComponent(id)}&note=${encodeURIComponent(val)}`
-  })
-  .then(r => r.text())
-  .then(t => {
-    const clean = t.replace(/<[^>]*>/g, '').trim().toLowerCase();
-    if (clean === 'ok' || clean === 'success') {
-      ta.dataset.original = val;              // tandai versi tersimpan
-      status.textContent = '✓ Tersimpan';
-      setTimeout(() => status.textContent = '', 1500);
-    } else {
-      throw new Error(clean || 'unknown');
-    }
-  })
-  .catch(err => {
-    alert('Gagal menyimpan note: ' + err.message);
-  })
-  .finally(() => {
-    btn.textContent = oldText;
-    toggleSaveBtn(id); // re-evaluate (akan disable lagi kalau tak ada perubahan)
-  });
-}
-
-// (opsional) shortcut Ctrl+S / Cmd+S ketika fokus di textarea
-document.addEventListener('keydown', (e) => {
-  const isSave = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
-  if (!isSave) return;
-  const ta = document.activeElement;
-  if (!ta || ta.tagName !== 'TEXTAREA' || !ta.id.startsWith('note-')) return;
-  e.preventDefault();
-  const id = ta.id.replace('note-', '');
-  saveNote(id);
-});
   </script>  
 </body>
 </html>

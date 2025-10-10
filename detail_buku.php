@@ -8,9 +8,6 @@ $role = $user['status'] ?? null;
 $can_edit = in_array($role, ['Admin', 'Super Admin']);
 $can_access_eoffice = in_array($role, ['Sekretariat', 'Direktur','Super Admin']);
 
-if (!$user) {
-    die("Anda harus login terlebih dahulu.");
-}
 
 // Proses hapus data
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_id'])) {
@@ -273,21 +270,16 @@ if (!$data) {
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="bacaan.php" class="fitur-nav">Bacaan</a></li>
         <?php endif; ?>
-        <li><a href="masukan.php" class="fitur-nav">Masukan</a></li>
+        <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
          <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
            <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -309,13 +301,13 @@ if (!$data) {
         </div>
         <div class="buku-details">
             <h4><?= htmlspecialchars($data['judul']) ?></h4>
-
-            <!-- Tombol Tambah Bacaan -->
-            <form action="" method="POST">
-                <input type="hidden" name="id_buku" value="<?= htmlspecialchars($data['id_buku']) ?>">
-                <button type="submit" class="btn-tambah">Tambah ke Bacaan</button>
-            </form>  
-
+            <?php if ($user): ?>
+              <!-- Jika SUDAH login -->
+              <form action="" method="POST">
+                  <input type="hidden" name="id_buku" value="<?= htmlspecialchars($data['id_buku']) ?>">
+                  <button type="submit" class="btn-tambah">Tambah ke Bacaan</button>
+              </form>
+            <?php endif; ?>
             <!-- Tombol Lihat Buku -->
             <?php if (!empty($data['file_url']) && file_exists($data['file_url'])): ?>
                 <div style="margin-top: 15px;">
@@ -336,15 +328,6 @@ if (!$data) {
                 <button type="submit" class="btn-hapus">Hapus</button>
             </form>
         </div>
-        <?php endif; ?>
-
-
-        <?php if (!empty($data['file_url']) && file_exists($data['file_url'])): ?>
-            <div style="margin-top: 15px;">
-                <a href="<?= htmlspecialchars($data['file_url']) ?>" class="btn-download" download>📥 Download File</a>
-            </div>
-        <?php else: ?>
-            <p><em>Tidak ada file untuk diunduh.</em></p>
         <?php endif; ?>
         </div>
         </section>

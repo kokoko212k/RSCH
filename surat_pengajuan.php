@@ -30,8 +30,40 @@ $user = $_SESSION['user'] ?? null;
 // Ambil role/status user (atau kosong kalau belum login)
 $role = $user['status'] ?? null;
 // Cek apakah user punya akses ke fitur E-Office
-$can_access_eoffice = in_array($role, [ 'Sekretariat', 'Direktur', 'Super Admin']);
+$eofficeAll = [
+  'surat_masuk.php'                   => 'Surat Masuk',
+  'surat_keluar.php'                  => 'Surat Keluar',
+  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
+  'surat_disposisi.php'               => 'Disposisi Surat',
+  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
+  'surat_notif.php'                   => 'Surat Notif',
+  'surat_pengajuan.php'               => 'Pengajuan',
+];
 
+$rolePages = [
+  'Super Admin' => array_keys($eofficeAll), // semua
+  'Sekretariat' => [
+    'surat_masuk.php',
+    'surat_keluar.php',
+    'surat_disposisi_pengajuan.php',
+  ],
+  'Direktur' => [
+    'surat_disposisi.php',
+    'surat_notif.php',
+  ],
+  'Admin' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+  'Member' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+];
+
+// Tentukan halaman yang boleh tampil untuk role saat ini
+$allowedEofficePages = $rolePages[$role] ?? [];
+$can_access_eoffice  = !empty($allowedEofficePages);
 if (!isset($_SESSION['user'])) {
     header('Location: login.php');
     exit();
@@ -140,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     color: white;
     text-decoration: none;
     border-radius: 5px;
+    margin-bottom: 10px;
   }
 
   .btn-tambah:hover {
@@ -294,6 +327,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   background-color: #f0f0f0;
 }
 
+/* === Export dropdown === */
+.export-dropdown { position: relative; display: inline-block; }
+.export-toggle { cursor: pointer; }
+.export-menu {
+  position: absolute; top: 100%; left: 0;
+  display: none; min-width: 210px; padding: 6px;
+  background:#fff; border:1px solid #ddd; border-radius:8px;
+  box-shadow:0 6px 20px rgba(0,0,0,.08); z-index: 10;
+}
+.export-item {
+  display:block; width:100%; text-align:left;
+  padding:8px 10px; background:transparent; border:none; cursor:pointer;
+}
+.export-item:hover { background:#f2f6ff; }
+.export-dropdown.open .export-menu { display:block; }
+
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
 </head>
@@ -350,19 +399,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>            -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -377,10 +421,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="kontainer-balok">
     <!-- Balok 1: Tombol Upload dan Export -->
-    <div class="balok-1">
-        <a href="buat_surat_pengajuan.php" class="btn-tambah">Upload</a>
-        <button class="btn-tambah" onclick="exportTableToExcel()">Export</button>
+    <div class="export-dropdown">
+      <a href="buat_surat_pengajuan.php" class="btn-tambah">Upload</a>
+      <button type="button" class="btn-tambah export-toggle">Export ▾</button>
+      <div class="export-menu">
+        <button type="button" class="export-item" onclick="exportTableToExcel(false)">Export All</button>
+        <button type="button" class="export-item" onclick="exportTableToExcel(true)">Export 3 Bulan Terakhir</button>
+      </div>
     </div>
+
 
     <!-- Balok 2: Search Bar -->
     <div class="balok-2">
@@ -519,84 +568,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </script>
   <script src="script.js"></script>
   <script>
+    
   function filterTable(attribute, value) {
-  const rows = document.querySelectorAll('.data-row');
-  rows.forEach(row => {
-    if (value === "" || row.dataset[attribute.toLowerCase()] === value) {
-      row.style.display = "table-row";
-    } else {
-      row.style.display = "none";
-    }
-  });
+    const rows = document.querySelectorAll('.data-row');
+    const filterValue = (value || '').toLowerCase();
+    rows.forEach(row => {
+      const cellValue = (row.getAttribute('data-' + attribute) || '').toLowerCase();
+      row.style.display = (!filterValue || cellValue.includes(filterValue)) ? "table-row" : "none";
+    });
   }
-function exportTableToExcel() {
-    var table = document.getElementById("tabelSuratPengajuan").cloneNode(true);
 
-    // Hapus elemen no-export
-    var filters = table.querySelectorAll(".no-export");
-    filters.forEach(filter => filter.remove());
-
-    var headers = table.querySelectorAll("th");
-    var removeIndexes = [];
-
-    // Cari index kolom yang mau dihapus
-    headers.forEach((cell, index) => {
-        var text = cell.childNodes[0].textContent.trim(); // ⬅️ Ambil hanya teks label
-        if (text === "Aksi" || text === "File") {
-            removeIndexes.push(index);
-        }
+(function(){
+  const dd  = document.querySelector('.export-dropdown');
+  const btn = dd?.querySelector('.export-toggle');
+  if (btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dd.classList.toggle('open');
     });
+    document.addEventListener('click', () => dd.classList.remove('open'));
+  }
+})();
 
-    // Ambil header (ambil teks node pertama saja)
-    var headerCells = table.querySelectorAll('tr')[0].querySelectorAll('th');
-    var headersArray = [];
+function exportTableToExcel(last3Months) {
+  if (typeof XLSX === 'undefined') { alert('Library XLSX belum ter-load.'); return; }
 
-    headerCells.forEach((cell, index) => {
-        if (!removeIndexes.includes(index)) {
-            headersArray.push(cell.childNodes[0].textContent.trim()); // ⬅️ Ini kunci
-        }
-    });
+  const src = document.getElementById("tabelSuratPengajuan");
+  if (!src) { alert("Tabel tidak ditemukan"); return; }
 
-    // Ambil data isi
-    var bodyRows = table.querySelectorAll('tr');
-    var dataArray = [];
+  // clone tabel agar aman dimodif
+  const table = src.cloneNode(true);
 
-    // Mulai dari baris kedua (index 1), baris pertama adalah header
-    for (var i = 1; i < bodyRows.length; i++) {
-        var row = bodyRows[i];
-        var rowData = [];
-        var cells = row.querySelectorAll('td');
-        cells.forEach((cell, index) => {
-            if (!removeIndexes.includes(index)) {
-                rowData.push(cell.textContent.trim());
-            }
-        });
-        if (rowData.length > 0) { // Hindari baris kosong
-            dataArray.push(rowData);
-        }
+  // buang elemen yang tidak perlu diexport
+  table.querySelectorAll(".no-export, select, form, button").forEach(el => el.remove());
+
+  const DATE_ATTR = 'tanggal';
+  function parseFlexibleDate(str){
+    if (!str) return null;
+    str = String(str).trim();
+    if (str.length >= 10) str = str.slice(0,10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [y,m,d] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;
     }
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+      const [d,m,y] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    return null;
+  }
 
-    // Gabungkan header dan data
-    var exportData = [headersArray, ...dataArray];
+  if (last3Months) {
+    // rolling 90 hari terakhir dari hari ini
+    const today = new Date();
+    const start = new Date(today.getTime() - 90*24*60*60*1000);
+    const end   = today;
 
-    // Buat file Excel
-    var ws = XLSX.utils.aoa_to_sheet(exportData);
-    ws['!cols'] = [
-        { wch: 15 }, // Tanggal 
-        { wch: 15 }, // No. Surat
-        { wch: 30 }, // Dari
-        { wch: 30 }, // Disposisi
-    ];
+    table.querySelectorAll("tr.data-row").forEach(tr => {
+      const raw = tr.getAttribute("data-" + DATE_ATTR) || "";
+      const dt  = parseFlexibleDate(raw);
+      if (!dt || dt < start || dt > end) tr.remove();
+    });
+  }
 
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Users");
+  // buang kolom 'File' dan 'Aksi' (berdasarkan judul th)
+  const header = table.querySelector("tr");
+  const ths = Array.from(header.children);
+  const removeIdx = ths
+    .map((th, i) => [ (th.textContent || '').trim().split('\n')[0], i ])
+    .filter(([t]) => t === "File" || t === "Aksi")
+    .map(([, i]) => i);
 
-    XLSX.writeFile(wb, "surat_pengajuan.xlsx");
-    alert("Data berhasil diekspor!");
+  table.querySelectorAll("tr").forEach(tr => {
+    Array.from(tr.children).forEach((td, i) => {
+      if (removeIdx.includes(i)) td.remove();
+    });
+  });
+
+  // buat workbook dari tabel
+  const wb = XLSX.utils.table_to_book(table, { sheet: "Surat Pengajuan" });
+  const ws = wb.Sheets["Surat Pengajuan"];
+
+  // auto width kolom sederhana berdasarkan header
+  const firstRow = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] || [];
+  ws['!cols'] = firstRow.map(h => ({ wch: Math.min(Math.max(String(h||'').length + 2, 12), 40) }));
+
+  XLSX.writeFile(wb, `surat_pengajuan${last3Months ? '_3 bulan terakhir' : '_all'}.xlsx`);
+
+  // tutup dropdown
+  document.querySelector('.export-dropdown')?.classList.remove('open');
 }
-
-
-
 
     function resetFilters() {
       // Reset semua dropdown
@@ -644,6 +707,35 @@ function exportTableToExcel() {
     resetContainer.style.display = "block";
   }
 }
+
+function showResetButton() {
+  const resetContainer = document.getElementById('reset-container');
+  if (!resetContainer) return;
+
+  const search = document.getElementById('searchInput');
+  const selects = document.querySelectorAll('#tabelSuratPengajuan th select');
+  const dates   = document.querySelectorAll('#tabelSuratPengajuan th input[type="date"]');
+
+  const hasSearch = !!(search && search.value.trim().length > 0);
+  const hasSelect = Array.from(selects).some(s => (s.value || '').trim() !== '');
+  const hasDate   = Array.from(dates).some(i => (i.value || '').trim() !== '');
+
+  resetContainer.style.display = (hasSearch || hasSelect || hasDate) ? 'block' : 'none';
+}
+
+// Hook semua kontrol agar memanggil showResetButton
+document.addEventListener('DOMContentLoaded', () => {
+  const search = document.getElementById('searchInput');
+  const selects = document.querySelectorAll('#tabelSuratPengajuan th select');
+  const dates   = document.querySelectorAll('#tabelSuratPengajuan th input[type="date"]');
+
+  if (search) search.addEventListener('input', showResetButton);
+  selects.forEach(s => s.addEventListener('change', showResetButton));
+  dates.forEach(i => i.addEventListener('change', showResetButton));
+
+  // panggil sekali saat load untuk set keadaan awal
+  showResetButton();
+});
   </script>  
 </body>
 </html>

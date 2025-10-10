@@ -10,11 +10,7 @@ if (!isset($_SESSION['user'])) {
 
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-// deteksi AJAX
-$isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
-          strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_disposisi']) || ($_POST['aksi'] ?? '') === 'update_disposisi')) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) {
     $id  = (int)($_POST['id_tindaklanjut'] ?? 0);
     $val = trim((string)($_POST['disposisi_kepada'] ?? ''));
 
@@ -24,110 +20,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_disposisi']) 
     }
 
     if ($id <= 0 || $val === '') {
-        if ($isAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['ok'=>false,'error'=>'Param tidak lengkap']);
-            exit;
-        }
         $_SESSION['flash'] = 'Param tidak lengkap';
         header('Location: surat_disposisi_tindak_lanjut.php'); exit;
     }
 
-    try {
-        $pdo->beginTransaction();
+    // update tabel tindak lanjut
+    $pdo->prepare("
+        UPDATE surat_disposisi_tindak_lanjut 
+        SET disposisi_kepada = ? 
+        WHERE id_tindaklanjut = ?
+    ")->execute([$val, $id]);
 
-        // update baris ini
-        $pdo->prepare("
-            UPDATE surat_disposisi_tindak_lanjut
-               SET disposisi_kepada = ?
-             WHERE id_tindaklanjut = ?
-        ")->execute([$val, $id]);
+    $r = $pdo->prepare("SELECT no_surat, file_url FROM surat_disposisi_tindak_lanjut WHERE id_tindaklanjut=?");
+    $r->execute([$id]);
+    if ($row = $r->fetch(PDO::FETCH_ASSOC)) {
+        $pdo->prepare("UPDATE surat_disposisi_tindak_lanjut SET disposisi_kepada=? WHERE no_surat=?")
+            ->execute([$val, $row['no_surat']]);
 
-        // ambil no_surat untuk sync saudara kembar no_surat yang sama (kalau memang ada duplikat baris TL)
-        $r = $pdo->prepare("SELECT no_surat, file_url FROM surat_disposisi_tindak_lanjut WHERE id_tindaklanjut=?");
-        $r->execute([$id]);
-        $row = $r->fetch(PDO::FETCH_ASSOC);
-
-        if ($row) {
-            // samakan semua baris dengan no_surat yang sama
-            $pdo->prepare("UPDATE surat_disposisi_tindak_lanjut SET disposisi_kepada=? WHERE no_surat=?")
-                ->execute([$val, $row['no_surat']]);
-
-            // buat notifikasi (opsional)
-            $pdo->prepare("INSERT INTO surat_notif (tanggal,no_surat,file_url,waktu) VALUES (?,?,?,NOW())")
-                ->execute([date('Y-m-d'), $row['no_surat'], $row['file_url']]);
-        }
-
-        $pdo->commit();
-
-        if ($isAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['ok'=>true]);
-            exit;
-        }
-
-        $_SESSION['flash'] = 'Disposisi diperbarui';
-        header('Location: surat_disposisi_tindak_lanjut.php'); exit;
-
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        if ($isAjax) {
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
-            exit;
-        }
-        $_SESSION['flash'] = 'Gagal: '.$e->getMessage();
-        header('Location: surat_disposisi_tindak_lanjut.php'); exit;
+        // buat notifikasi
+        $pdo->prepare("INSERT INTO surat_notif (tanggal,no_surat,file_url,waktu) VALUES (?,?,?,NOW())")
+            ->execute([date('Y-m-d'), $row['no_surat'], $row['file_url']]);
     }
+
+    $_SESSION['flash'] = 'Disposisi diperbarui';
+    header('Location: surat_disposisi_tindak_lanjut.php'); exit;
 }
 
-if (isset($_GET['delete'])) {
-    $id = (int)$_GET['delete'];
-    if ($id > 0) {
-        $pdo->prepare("DELETE FROM surat_disposisi_tindak_lanjut WHERE id_tindaklanjut = ?")
-            ->execute([$id]);
-        $_SESSION['flash'] = 'Data dihapus';
-    }
-    header('Location: surat_disposisi_tindak_lanjut.php');
-    exit;
-}
 
 $user  = $_SESSION['user'];
 $role  = $user['status'] ?? null;
-$eofficeAll = [
-  'surat_masuk.php'                   => 'Surat Masuk',
-  'surat_keluar.php'                  => 'Surat Keluar',
-  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
-  'surat_disposisi.php'               => 'Disposisi Surat',
-  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
-  'surat_notif.php'                   => 'Surat Notif',
-  'surat_pengajuan.php'               => 'Pengajuan',
-];
-
-$rolePages = [
-  'Super Admin' => array_keys($eofficeAll), // semua
-  'Sekretariat' => [
-    'surat_masuk.php',
-    'surat_keluar.php',
-    'surat_disposisi_pengajuan.php',
-  ],
-  'Direktur' => [
-    'surat_disposisi.php',
-    'surat_notif.php',
-  ],
-  'Admin' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-  'Member' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-];
-
-// Tentukan halaman yang boleh tampil untuk role saat ini
-$allowedEofficePages = $rolePages[$role] ?? [];
-$can_access_eoffice  = !empty($allowedEofficePages);
+$can_access_eoffice = in_array($role, ['Super Admin']);
 $pengirim = $user['nama'] ?? '';
 
 
@@ -152,8 +74,6 @@ foreach ($dataDisposisi as $row) {
     }
 }
 
-$noSuratTL = $pdo->query("SELECT DISTINCT no_surat FROM surat_disposisi_tindak_lanjut ORDER BY no_surat ASC")->fetchAll(PDO::FETCH_COLUMN);
-$disposisiTL = $pdo->query("SELECT DISTINCT disposisi_kepada FROM surat_disposisi_tindak_lanjut WHERE disposisi_kepada IS NOT NULL AND disposisi_kepada<>'' ORDER BY disposisi_kepada ASC")->fetchAll(PDO::FETCH_COLUMN);
 $stmt = $pdo->query("SELECT * FROM surat_disposisi_tindak_lanjut ORDER BY tanggal DESC");
 $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -403,29 +323,6 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
     text-align: right;
 }
 
-#tabelSuratDisposisiTindakLanjut th .no-export select {
-  width: 20px;
-  height: 22px;
-  font-size: 13px;
-  border: 1px solid #d7d7d7;
-  border-radius: 6px;
-  background: #fff;
-  box-sizing: border-box;
-  cursor: pointer;
-}
-
-#tabelSuratDisposisiTindakLanjut th .no-export select:focus {
-  outline: none;
-  border-color: #5b9bff;
-  box-shadow: 0 0 0 3px rgba(91,155,255,.15);
-}
-
-/* jaga jarak dengan judul kolom */
-#tabelSuratDisposisiTindakLanjut th .no-export { 
-  margin-top: 6px;
-}
-```
-
 </style>
 <body>
   <!-- Latar Belakang -->
@@ -478,16 +375,21 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="bacaan.php" class="fitur-nav">Bacaan</a></li>
         <?php endif; ?>
-        <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
+        <li><a href="masukan.php" class="fitur-nav">Masukan</a></li>
         <?php if ($can_access_eoffice): ?>
-          <li class="dropdown">
-            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-            <div class="dropdown-content">
-              <?php foreach ($allowedEofficePages as $href): ?>
-                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
-              <?php endforeach; ?>
-            </div>
-          </li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat_masuk.php">Surat Masuk</a>
+            <a href="surat_keluar.php">Surat Keluar</a>
+            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
+            <a href="surat_disposisi.php">Disposisi Surat</a>
+            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
+            <a href="surat_notif.php">Surat Notif</a>          
+            <a href="surat_pengajuan.php">Pengajuan</a>          
+            <!-- <a href="surat_internal.php">Surat Internal</a>         -->
+          </div>
+        </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -524,50 +426,20 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <div class="table-container">
     <table id="tabelSuratDisposisiTindakLanjut" border="1" cellpadding="10" cellspacing="0">
         <thead>
-          <tr>
-            <th>No</th>
-            <th>
-              Tanggal
-              <div class="form-group no-export">
-                <input type="date" id="flt-tanggal-tl"
-                      onchange="applyTLFilters(); showTLReset();" />
-              </div>
-            </th>
-            <th>
-              No Surat
-              <div class="no-export">
-                <select id="flt-nosurat-tl" onchange="applyTLFilters(); showTLReset();">
-                  <option value=""></option>
-                  <?php foreach ($noSuratTL as $ns): ?>
-                    <option value="<?= htmlspecialchars($ns) ?>"><?= htmlspecialchars($ns) ?></option>
-                  <?php endforeach; ?>
-                </select>
-              </div>
-            </th>
-            <th>File</th>
-            <th>Chat</th>
-            <th>
-              Disposisi Kepada
-              <div class="no-export">
-                <select id="flt-disposisi-tl" onchange="applyTLFilters(); showTLReset();">
-                  <option value=""></option>
-                  <?php foreach ($disposisiTL as $dk): ?>
-                    <option value="<?= htmlspecialchars($dk) ?>"><?= htmlspecialchars($dk) ?></option>
-                  <?php endforeach; ?>
-                </select>
-              </div>
-            </th>
-            <th>Aksi</th>
-          </tr>
+            <tr>
+                <th>No</th>
+                <th>Tanggal</th>
+                <th>No Surat</th>
+                <th>File</th>
+                <th>Chat</th>
+                <th>Disposisi Kepada</th>
+                <th>Aksi</th>
+            </tr>
         </thead>
         <tbody>
         <?php if (!empty($semuaData)): ?>
             <?php $no = 1; foreach ($semuaData as $row): ?>
-                <tr class="data-row"
-                    data-tanggal="<?= htmlspecialchars($row['tanggal'] ?? '') ?>"
-                    data-no_surat="<?= htmlspecialchars($row['no_surat'] ?? '') ?>"
-                    data-disposisi_kepada="<?= htmlspecialchars($row['disposisi_kepada'] ?? '') ?>"
-                    data-id="<?= (int)$row['id_tindaklanjut'] ?>">
+                <tr class="data-row" data-id="<?= $row['id_tindaklanjut'] ?>" data-no-surat="<?= $row['no_surat'] ?>">
                     <td><?= $no++ ?></td>
                     <td><?= htmlspecialchars($row['tanggal'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['no_surat'] ?? '') ?></td>
@@ -622,10 +494,12 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <td colspan="7">
                         <div class="chat-box" data-no-surat="<?= $row['no_surat'] ?>"></div>
                         <form class="form-chat" data-no-surat="<?= $row['no_surat'] ?>" method="POST">
-                          <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
-                          <textarea name="pesan" placeholder="Ketik pesan..." required style="width:50%"></textarea>
-                          <button type="submit">Kirim</button>
-                        </form> 
+                            <input type="hidden" name="pengirim" value="<?= htmlspecialchars($user['nama']) ?>">
+                            <input type="hidden" name="penerima" value="<?= ($user['status'] === 'Super Admin' ? 'Sekretariat' : 'Super Admin') ?>">
+                            <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
+                            <textarea name="pesan" placeholder="Ketik pesan..." required style="width: 50%;"></textarea>
+                            <button type="submit">Kirim</button>
+                        </form>   
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -711,6 +585,68 @@ function filterTable(attribute, value) {
   });
 }
 
+function exportTableToExcel() {
+    var table = document.getElementById("tabelSuratDisposisiTindakLanjut").cloneNode(true);
+
+    // Hapus elemen no-export
+    var filters = table.querySelectorAll(".no-export");
+    filters.forEach(filter => filter.remove());
+
+    var headers = table.querySelectorAll("th");
+    var removeIndexes = [];
+
+    // Cari index kolom yang mau dihapus
+    headers.forEach((cell, index) => {
+        var text = cell.childNodes[0].textContent.trim();
+        if (text === "Aksi" || text === "File") {
+            removeIndexes.push(index);
+        }
+    });
+
+    // Ambil header
+    var headerCells = table.querySelectorAll('tr')[0].querySelectorAll('th');
+    var headersArray = [];
+
+    headerCells.forEach((cell, index) => {
+        if (!removeIndexes.includes(index)) {
+            headersArray.push(cell.childNodes[0].textContent.trim());
+        }
+    });
+
+    // Ambil data isi
+    var bodyRows = table.querySelectorAll('tr');
+    var dataArray = [];
+
+    for (var i = 1; i < bodyRows.length; i++) {
+        var row = bodyRows[i];
+        var rowData = [];
+        var cells = row.querySelectorAll('td');
+        cells.forEach((cell, index) => {
+            if (!removeIndexes.includes(index)) {
+                rowData.push(cell.textContent.trim());
+            }
+        });
+        if (rowData.length > 0) {
+            dataArray.push(rowData);
+        }
+    }
+
+    var exportData = [headersArray, ...dataArray];
+
+    var ws = XLSX.utils.aoa_to_sheet(exportData);
+    ws['!cols'] = [
+        { wch: 15 }, 
+        { wch: 15 }, 
+        { wch: 30 }, 
+        { wch: 15 }, 
+    ];
+
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "surat disposisi tindak lanjut");
+
+    XLSX.writeFile(wb, "surat_disposisi_tindak_lanjut.xlsx");
+    alert("Data berhasil diekspor!");
+}
 
 function resetFilters() {
   const selects = document.querySelectorAll('select');
@@ -1099,132 +1035,8 @@ function toggleChatBoxFromBtn(btn) {
     if (noSurat) loadChat(noSurat, chatBox);
   }
 }
+
+
   </script>  
-<script>
-  window.exportTableToExcel = function () {
-  if (typeof XLSX === 'undefined') {
-    alert('Library XLSX belum dimuat. Pastikan xlsx.full.min.js sudah di-include.');
-    return;
-  }
-
-  const table = document.getElementById('tabelSuratDisposisiTindakLanjut');
-  if (!table) { alert('Tabel tidak ditemukan.'); return; }
-
-  const headerRow = table.querySelector('thead tr');
-  if (!headerRow) { alert('Header tabel tidak ditemukan.'); return; }
-  const ths = Array.from(headerRow.querySelectorAll('th'));
-
-  const removeIdx = [];
-  const headers = [];
-
-  ths.forEach((th, idx) => {
-    const label = (th.childNodes[0]?.textContent || th.textContent || '').trim();
-    if (['File', 'Chat', 'Aksi'].includes(label)) {
-      removeIdx.push(idx);
-    } else {
-      headers.push(label);
-    }
-  });
-
-  const disposisiIdx = ths.findIndex(
-    th => (th.textContent || '').trim().toLowerCase() === 'disposisi kepada'
-  );
-
-  const bodyRows = Array.from(table.querySelectorAll('tbody tr.data-row'));
-  const visibleRows = bodyRows.filter(tr => window.getComputedStyle(tr).display !== 'none');
-
-  const data = [];
-  visibleRows.forEach(tr => {
-    const tds = Array.from(tr.querySelectorAll('td'));
-    const row = [];
-
-    tds.forEach((td, idx) => {
-      if (removeIdx.includes(idx)) return;
-
-      let text;
-      if (idx === disposisiIdx) {
-        const shown = td.querySelector('div, span');
-        text = (shown?.textContent || td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
-      } else {
-        text = (td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
-      }
-
-      row.push(text);
-    });
-
-    if (row.some(v => v !== '')) data.push(row);
-  });
-
-  const aoa = [headers, ...data];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-  ws['!cols'] = [
-    { wch: 6 },   // No
-    { wch: 14 },  // Tanggal
-    { wch: 22 },  // No Surat
-    { wch: 50 },  // Disposisi Kepada
-  ].slice(0, headers.length);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'surat disposisi tindak lanjut');
-  XLSX.writeFile(wb, 'surat_disposisi_tindak_lanjut.xlsx');
-
-  alert('Data berhasil diekspor!');
-};
-
-function showTLReset(){
-  const hasDate = !!document.getElementById('flt-tanggal-tl')?.value;
-  const hasNo   = !!document.getElementById('flt-nosurat-tl')?.value;
-  const hasDisp = !!document.getElementById('flt-disposisi-tl')?.value;
-  const box = document.getElementById('reset-container');
-  if (box) box.style.display = (hasDate || hasNo || hasDisp) ? 'block' : 'none';
-}
-
-// terapkan semua filter
-function applyTLFilters(){
-  const vTanggal = (document.getElementById('flt-tanggal-tl')?.value || '').toLowerCase(); // format yyyy-mm-dd
-  const vNoSurat = (document.getElementById('flt-nosurat-tl')?.value || '').toLowerCase();
-  const vDisp    = (document.getElementById('flt-disposisi-tl')?.value || '').toLowerCase();
-
-  document.querySelectorAll('#tabelSuratDisposisiTindakLanjut .data-row').forEach(tr => {
-    const tTanggal = (tr.getAttribute('data-tanggal') || '').toLowerCase();
-    const tNoSurat = (tr.getAttribute('data-no_surat') || '').toLowerCase();
-    const tDisp    = (tr.getAttribute('data-disposisi_kepada') || '').toLowerCase();
-
-    let visible = true;
-
-    // tanggal: cocokkan prefix (yyyy-mm-dd) biar aman walau ada waktu
-    if (vTanggal && !tTanggal.startsWith(vTanggal)) visible = false;
-
-    if (vNoSurat && !tNoSurat.includes(vNoSurat)) visible = false;
-
-    if (vDisp && !tDisp.includes(vDisp)) visible = false;
-
-    tr.style.display = visible ? 'table-row' : 'none';
-  });
-}
-
-// reset semua filter header TL
-function resetFilters(){
-  // reset filter umum punyamu (kalau ada)
-  // ...
-
-  // reset filter TL
-  const t = document.getElementById('flt-tanggal-tl'); if (t) t.value = '';
-  const n = document.getElementById('flt-nosurat-tl'); if (n) n.selectedIndex = 0;
-  const d = document.getElementById('flt-disposisi-tl'); if (d) d.selectedIndex = 0;
-
-  // tampilkan semua baris
-  document.querySelectorAll('#tabelSuratDisposisiTindakLanjut .data-row')
-    .forEach(tr => tr.style.display = 'table-row');
-
-  showTLReset();
-}
-
-// panggil awal (optional)
-document.addEventListener('DOMContentLoaded', () => {
-  showTLReset();
-});
-</script>
 </body>
 </html>

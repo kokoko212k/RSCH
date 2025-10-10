@@ -21,8 +21,40 @@ if (!isset($_SESSION['user'])) {
 
 $user = $_SESSION['user'] ?? null;
 $role = $user['status'] ?? null;
-$can_access_eoffice = in_array($role, ['Sekretariat', 'Direktur', 'Super Admin']);
+$eofficeAll = [
+  'surat_masuk.php'                   => 'Surat Masuk',
+  'surat_keluar.php'                  => 'Surat Keluar',
+  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
+  'surat_disposisi.php'               => 'Disposisi Surat',
+  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
+  'surat_notif.php'                   => 'Surat Notif',
+  'surat_pengajuan.php'               => 'Pengajuan',
+];
 
+$rolePages = [
+  'Super Admin' => array_keys($eofficeAll), // semua
+  'Sekretariat' => [
+    'surat_masuk.php',
+    'surat_keluar.php',
+    'surat_disposisi_pengajuan.php',
+  ],
+  'Direktur' => [
+    'surat_disposisi.php',
+    'surat_notif.php',
+  ],
+  'Admin' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+  'Member' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+];
+
+// Tentukan halaman yang boleh tampil untuk role saat ini
+$allowedEofficePages = $rolePages[$role] ?? [];
+$can_access_eoffice  = !empty($allowedEofficePages);
 // Ambil ID dari URL
 $id = $_GET['id'] ?? null;
 
@@ -287,19 +319,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>            -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>

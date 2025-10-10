@@ -13,73 +13,16 @@ if (!$conn) {
 
 include 'config.php';
 
-
-// helper aman untuk HTML
-function h(?string $s): string {
-    return htmlspecialchars($s ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-}
-
-// ====== AJAX: simpan NOTE dari surat_keluar ======
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_note'], $_POST['id'])) {
-    header('Content-Type: text/plain; charset=utf-8');
-
-    $id   = (int)($_POST['id'] ?? 0);
-    // Batasin 255 char biar aman (silakan sesuaikan)
-    $note = trim(substr($_POST['note'] ?? '', 0, 255));
-
-    if ($id > 0) {
-        $stmt = $pdo->prepare("UPDATE surat_keluar SET note = :note WHERE id = :id");
-        $ok   = $stmt->execute(['note' => $note, 'id' => $id]);
-        echo $ok ? 'ok' : 'error';
-    } else {
-        echo 'invalid';
-    }
-    exit();
-}
-
 // Cek login
 if (!isset($_SESSION['user'])) {
     header('Location: login.php');
     exit();
 }
 
-
 $user = $_SESSION['user'] ?? null;
 $role = $user['status'] ?? null;
-$eofficeAll = [
-  'surat_masuk.php'                   => 'Surat Masuk',
-  'surat_keluar.php'                  => 'Surat Keluar',
-  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
-  'surat_disposisi.php'               => 'Disposisi Surat',
-  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
-  'surat_notif.php'                   => 'Surat Notif',
-  'surat_pengajuan.php'               => 'Pengajuan',
-];
+$can_access_eoffice = in_array($role, ['Sekretariat', 'Super Admin']);
 
-$rolePages = [
-  'Super Admin' => array_keys($eofficeAll), // semua
-  'Sekretariat' => [
-    'surat_masuk.php',
-    'surat_keluar.php',
-    'surat_disposisi_pengajuan.php',
-  ],
-  'Direktur' => [
-    'surat_disposisi.php',
-    'surat_notif.php',
-  ],
-  'Admin' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-  'Member' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-];
-
-// Tentukan halaman yang boleh tampil untuk role saat ini
-$allowedEofficePages = $rolePages[$role] ?? [];
-$can_access_eoffice  = !empty($allowedEofficePages);
 // Hapus data
 if (isset($_GET['delete'])) {
     $id = $_GET['delete'];
@@ -105,7 +48,6 @@ $noSuratResult = mysqli_query($conn, "SELECT DISTINCT no_surat FROM surat_keluar
 $ditujukanKepadaResult = mysqli_query($conn, "SELECT DISTINCT ditujukan_kepada FROM surat_keluar");
 $perihalResult = mysqli_query($conn, "SELECT DISTINCT perihal FROM surat_keluar");
 // $keteranganResult = mysqli_query($conn, "SELECT DISTINCT keterangan FROM surat_keluar");
-$noteResult = mysqli_query($conn, "SELECT DISTINCT note FROM surat_keluar WHERE note IS NOT NULL AND note <> ''");
 $instruksiResult = mysqli_query($conn, "SELECT DISTINCT instruksi FROM surat_keluar");
 
 // Ambil semua data surat keluar
@@ -121,12 +63,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     $perihal = $_POST['perihal'];
     // $keterangan = $_POST['keterangan'];
     $instruksi = $_POST['instruksi'];
-    $note = isset($_POST['note']) ? trim($_POST['note']) : null;
 
     $stmt = $pdo->prepare("INSERT INTO surat_keluar 
-        (tanggal, tanggal_diterima, tanggal_disposisi, no_surat, ditujukan_kepada, perihal, instruksi, note) 
-        VALUES (:tanggal, :tanggal_diterima, :tanggal_disposisi, :no_surat, :ditujukan_kepada, :perihal, :instruksi, :note)");
-
+        (tanggal, tanggal_diterima, tanggal_disposisi, no_surat, ditujukan_kepada, perihal, instruksi) 
+        VALUES (:tanggal, :tanggal_diterima, :tanggal_disposisi, :no_surat, :ditujukan_kepada, :perihal, :instruksi)");
+    
     $stmt->execute([
         'tanggal' => $tanggal,
         'tanggal_diterima' => $tanggal_diterima,
@@ -134,8 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
         'no_surat' => $no_surat,
         'ditujukan_kepada' => $ditujukan_kepada,
         'perihal' => $perihal,
-        'instruksi' => $instruksi,
-        'note' => $note,
+        // 'keterangan' => $keterangan,
+        'instruksi' => $instruksi
     ]);
 
     header('Location: surat_keluar.php?success=1');
@@ -574,6 +515,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
 .export-item:hover { background:#f2f6ff; }
 .export-dropdown.open .export-menu { display:block; }
 
+#tabelSuratKeluar th input[type="date"]{
+  width: 29px;           /* jangan 10% / 20px */
+  height: 20px;           /* cukup tinggi agar ikon muncul */
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background-color: #fff;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  margin-bottom: 4px;
+}
+
+/* bikin ikon bawaan keliatan (Chrome/Edge/Safari) */
+#tabelSuratKeluar th input[type="date"]::-webkit-calendar-picker-indicator{
+  cursor: pointer;
+  opacity: .8;
+  /* kalau butuh ganti warna ikon: */
+  /* filter: invert(35%); */
+}
+
+/* hover kecil */
+#tabelSuratKeluar th input[type="date"]:hover::-webkit-calendar-picker-indicator{
+  opacity: 1;
+}
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -630,14 +595,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-          <li class="dropdown">
-            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-            <div class="dropdown-content">
-              <?php foreach ($allowedEofficePages as $href): ?>
-                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
-              <?php endforeach; ?>
-            </div>
-          </li>
+        <li class="dropdown">
+          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+          <div class="dropdown-content">
+            <a href="surat_masuk.php">Surat Masuk</a>
+            <a href="surat_keluar.php">Surat Keluar</a>
+            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
+            <a href="surat_disposisi.php">Disposisi Surat</a>
+            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
+            <a href="surat_notif.php">Surat Notif</a>          
+            <a href="surat_pengajuan.php">Pengajuan</a>          
+            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
+          </div>
+        </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -665,7 +635,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
     <!-- Balok 2: Search Bar -->
     <div class="balok-2">
         <div class="search-bar">
-            <input type="text" placeholder="Cari surat..." id="searchInput" oninput="searchTable()" />
+              <input type="text" id="searchInput" placeholder="Cari surat..." oninput="applyAllFilters(); showResetButton()" />
             <button>Cari</button>
         </div>
     </div>
@@ -675,27 +645,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
         <table id="tabelSuratKeluar" border="1" cellpadding="9" cellspacing="0">
             <tr>
                 <th>
-                    Tanggal
-                    <div class="form-group">
-                        <input type="date" id="tanggalSurat" name="tanggalSurat" required onchange="filterTable('tanggal', this.value); showResetButton();" />
-                    </div>
+                  Tanggal
+                  <div class="form-group">
+                    <input type="date" id="tanggalSuratFrom" onchange="applyAllFilters(); showResetButton();" />
+                    <input type="date" id="tanggalSuratTo"   onchange="applyAllFilters(); showResetButton();" />
+                  </div>
                 </th>
                 <th>
-                    Tanggal Diterima
-                    <div class="form-group">
-                        <input type="date" id="tanggalDiterima" name="tanggalDiterima" onchange="filterTable('tanggal_diterima', this.value); showResetButton();" />
-                    </div>
+                  Tanggal Diterima
+                  <div class="form-group">
+                    <input type="date" id="tanggalDiterimaFrom" onchange="applyAllFilters(); showResetButton();" />
+                    <input type="date" id="tanggalDiterimaTo"   onchange="applyAllFilters(); showResetButton();" />
+                  </div>
                 </th>
                 <th>
-                    Tanggal Disposisi
-                    <div class="form-group">
-                        <input type="date" id="tanggalDisposisi" name="tanggalDisposisi" onchange="filterTable('tanggal_disposisi', this.value); showResetButton();" />
-                    </div>
-                </th>               
+                  Tanggal Disposisi
+                  <div class="form-group">
+                    <input type="date" id="tanggalDisposisiFrom" onchange="applyAllFilters(); showResetButton();" />
+                    <input type="date" id="tanggalDisposisiTo"   onchange="applyAllFilters(); showResetButton();" />
+                  </div>
+                </th>   
                 <th>
                     No. Surat
                     <div class="no-export">
-                        <select onchange="filterTable('no_surat', this.value); showResetButton();">
+                        <select onchange="applyAllFilters('no_surat', this.value); showResetButton();">
                             <option value=""></option>
                             <?php while ($rowNoSurat = mysqli_fetch_assoc($noSuratResult)): ?>
                                 <option value="<?= $rowNoSurat['no_surat'] ?>"><?= $rowNoSurat['no_surat'] ?></option>
@@ -706,7 +679,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 <th>
                     Ditujukan Kepada
                     <div class="no-export">
-                        <select onchange="filterTable('ditujukan_kepada', this.value); showResetButton();">
+                        <select onchange="applyAllFilters('ditujukan_kepada', this.value); showResetButton();">
                             <option value=""></option>
                             <?php while ($rowTujuan = mysqli_fetch_assoc($ditujukanKepadaResult)): ?>
                                 <option value="<?= $rowTujuan['ditujukan_kepada'] ?>"><?= $rowTujuan['ditujukan_kepada'] ?></option>
@@ -717,7 +690,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 <th>
                     Perihal
                     <div class="no-export">
-                        <select onchange="filterTable('perihal', this.value); showResetButton();">
+                        <select onchange="applyAllFilters('perihal', this.value); showResetButton();">
                             <option value=""></option>
                             <?php while ($rowPerihal = mysqli_fetch_assoc($perihalResult)): ?>
                                 <option value="<?= $rowPerihal['perihal'] ?>"><?= $rowPerihal['perihal'] ?></option>
@@ -728,28 +701,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 <th>
                     Instruksi
                     <div class="no-export">
-                        <select onchange="filterTable('instruksi', this.value); showResetButton();">
+                        <select onchange="applyAllFilters('instruksi', this.value); showResetButton();">
                             <option value=""></option>
                             <?php while ($rowInstruksi = mysqli_fetch_assoc($instruksiResult)): ?>
                                 <option value="<?= $rowInstruksi['instruksi'] ?>"><?= $rowInstruksi['instruksi'] ?></option>
                             <?php endwhile; ?>
                         </select>
                     </div>
-                </th> 
-                <th>
-                    Note
-                    <div class="no-export">
-                      <select onchange="filterTable('note', this.value); showResetButton();">
-                        <option value=""></option>
-                        <?php while ($rowNote = mysqli_fetch_assoc($noteResult)): ?>
-                          <option value="<?= htmlspecialchars($rowNote['note']) ?>">
-                            <?= htmlspecialchars($rowNote['note']) ?>
-                          </option>
-                        <?php endwhile; ?>
-                      </select>
-                    </div>
-                </th>
-               
+                </th>                
                 <th>File</th>
                 <th>Aksi</th>
             </tr>
@@ -767,7 +726,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 data-ditujukan_kepada="<?= $row['ditujukan_kepada'] ?>"
                 data-perihal="<?= $row['perihal'] ?>"
                 data-instruksi="<?= $row['instruksi'] ?>"
-                data-note="<?= htmlspecialchars($row['note']) ?>"
                 data-file="<?= $row['file_url'] ?>">
                 <td><?= date('d-m-Y', strtotime($row['tanggal'])) ?></td>
                 <td><?= !empty($row['tanggal_diterima']) ? date('d-m-Y', strtotime($row['tanggal_diterima'])) : '-' ?></td>
@@ -781,13 +739,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 <td><?= $row['ditujukan_kepada'] ?></td>
                 <td><?= $row['perihal'] ?></td>
                 <td><?= $row['instruksi'] ?></td>
-                <td>
-                  <textarea
-                    class="note-view"
-                    readonly
-                    style="width:220px; min-height:60px; resize:vertical; background:#fff;"
-                  ><?= htmlspecialchars($row['note'] ?? '') ?></textarea>
-                </td>
                 <td>
                 <?php if (!empty($row['file_url'])): ?>
                     <?php foreach (explode(',', $row['file_url']) as $p): 
@@ -855,6 +806,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
     </div>
   </footer>
   <script>
+// Hook semua kontrol agar memanggil showResetButton
+document.addEventListener('DOMContentLoaded', () => {
+  const search = document.getElementById('searchInput');
+  const selects = document.querySelectorAll('#tabelSuratKeluar th select');
+  const dates   = document.querySelectorAll('#tabelSuratKeluar th input[type="date"]');
+
+  if (search) search.addEventListener('input', showResetButton);
+  selects.forEach(s => s.addEventListener('change', showResetButton));
+  dates.forEach(i => i.addEventListener('change', showResetButton));
+
+  // panggil sekali saat load untuk set keadaan awal
+  showResetButton();
+  applyAllFilters();   // set tampilan awal sesuai default filter (semua tampil)
+  showResetButton();   // set visibilitas tombol reset
+});
+
   const userIcon = document.querySelector(".user-icon");
   const userMenu = document.getElementById("userMenu");
   if (userIcon) {
@@ -873,16 +840,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
   </script>
   <script src="script.js"></script>
   <script>
-  function filterTable(attribute, value) {
-  const rows = document.querySelectorAll('.data-row');
-  rows.forEach(row => {
-    if (value === "" || row.dataset[attribute.toLowerCase()] === value) {
-      row.style.display = "table-row";
-    } else {
-      row.style.display = "none";
-    }
-  });
+
+
+function parseYMD(s) {
+  if (!s) return null;
+  // format expected: YYYY-MM-DD
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const dt = new Date(y, mo - 1, d);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+function inRange(dateStr, fromStr, toStr) {
+  // dateStr dari data-attribute (YYYY-MM-DD)
+  const d = parseYMD((dateStr || '').slice(0, 10));
+  if (!d) return false; // kalau baris tidak punya tanggal valid → anggap tidak match saat filter aktif
+
+  const from = parseYMD(fromStr);
+  const to   = parseYMD(toStr);
+  if (!from && !to) return true;        // tidak ada filter → lolos
+  if (from && d < from) return false;   // sebelum batas bawah
+  if (to) {
+    // agar inklusif pada hari 'to'
+    const toInc = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59, 999);
+    if (d > toInc) return false;
   }
+  return true;
+}
+
+function applyAllFilters() {
+  const q = (document.getElementById('searchInput')?.value || '').toLowerCase();
+
+  // Range tanggal:
+  const tFrom = document.getElementById('tanggalSuratFrom')?.value || '';
+  const tTo   = document.getElementById('tanggalSuratTo')?.value   || '';
+
+  const tdFrom = document.getElementById('tanggalDiterimaFrom')?.value || '';
+  const tdTo   = document.getElementById('tanggalDiterimaTo')?.value   || '';
+
+  const dispFrom = document.getElementById('tanggalDisposisiFrom')?.value || '';
+  const dispTo   = document.getElementById('tanggalDisposisiTo')?.value   || '';
+
+  // Dropdown lain (cari berdasarkan heading agar aman):
+  function getSelectValueByHeading(headingText){
+    const ths = Array.from(document.querySelectorAll('#tabelSuratKeluar th'));
+    const th = ths.find(t => (t.firstChild?.textContent || t.textContent).trim().split('\n')[0] === headingText);
+    const sel = th?.querySelector('select');
+    return (sel?.value || '').toLowerCase();
+  }
+
+  const f_noSurat   = getSelectValueByHeading('No. Surat');
+  const f_tujuan    = getSelectValueByHeading('Ditujukan Kepada');
+  const f_perihal   = getSelectValueByHeading('Perihal');
+  const f_instruksi = getSelectValueByHeading('Instruksi');
+
+  // Loop baris
+  document.querySelectorAll('#tabelSuratKeluar .data-row').forEach(row => {
+    const tanggal            = row.getAttribute('data-tanggal') || '';
+    const tanggal_diterima   = row.getAttribute('data-tanggal_diterima') || '';
+    const tanggal_disposisi  = row.getAttribute('data-tanggal_disposisi') || '';
+
+    const no_surat  = (row.getAttribute('data-no_surat') || '').toLowerCase();
+    const tujuan    = (row.getAttribute('data-ditujukan_kepada') || '').toLowerCase();
+    const perihal   = (row.getAttribute('data-perihal') || '').toLowerCase();
+    const instruksi = (row.getAttribute('data-instruksi') || '').toLowerCase();
+
+    // 1) cocokkan semua filter dropdown teks (mengandung)
+    const passSelects =
+      (!f_noSurat   || no_surat.includes(f_noSurat)) &&
+      (!f_tujuan    || tujuan.includes(f_tujuan)) &&
+      (!f_perihal   || perihal.includes(f_perihal)) &&
+      (!f_instruksi || instruksi.includes(f_instruksi));
+
+    // 2) cocokkan semua range tanggal (jika range diisi)
+    const passDates =
+      inRange(tanggal,           tFrom,   tTo) &&
+      inRange(tanggal_diterima,  tdFrom,  tdTo) &&
+      inRange(tanggal_disposisi, dispFrom, dispTo);
+
+    // 3) cocokkan keyword (search) ke semua kolom teks yang terlihat
+    let passSearch = true;
+    if (q) {
+      // cek teks baris (aman & cepat)
+      passSearch = row.innerText.toLowerCase().includes(q);
+    }
+
+    row.style.display = (passSelects && passDates && passSearch) ? 'table-row' : 'none';
+  });
+}  
 
 (function(){
   const dd  = document.querySelector('.export-dropdown');
@@ -996,22 +1042,22 @@ function exportTableToExcel(last3Months) {
         resetContainer.style.display = "none";
       }
     }
-  function searchTable() {
-  const input = document.getElementById("searchInput").value.toLowerCase();
-  const rows = document.querySelectorAll("#tabelSuratKeluar .data-row");
+  // function searchTable() {
+  // const input = document.getElementById("searchInput").value.toLowerCase();
+  // const rows = document.querySelectorAll("#tabelSuratKeluar .data-row");
 
-  rows.forEach(row => {
-    const cells = row.querySelectorAll("td");
-    let found = false;
+  // rows.forEach(row => {
+  //   const cells = row.querySelectorAll("td");
+  //   let found = false;
 
-    cells.forEach(cell => {
-      if (cell.textContent.toLowerCase().includes(input)) {
-        found = true;
-      }
-    });
+  //   cells.forEach(cell => {
+  //     if (cell.textContent.toLowerCase().includes(input)) {
+  //       found = true;
+  //     }
+  //   });
 
-    row.style.display = found ? "table-row" : "none";
-  });
+  //   row.style.display = found ? "table-row" : "none";
+  // });
 
   // Tampilkan tombol reset jika ada input
   const resetContainer = document.getElementById("reset-container");
@@ -1050,19 +1096,7 @@ function showResetButton() {
   resetContainer.style.display = (hasSearch || hasSelect || hasDate) ? 'block' : 'none';
 }
 
-// Hook semua kontrol agar memanggil showResetButton
-document.addEventListener('DOMContentLoaded', () => {
-  const search = document.getElementById('searchInput');
-  const selects = document.querySelectorAll('#tabelSuratKeluar th select');
-  const dates   = document.querySelectorAll('#tabelSuratKeluar th input[type="date"]');
 
-  if (search) search.addEventListener('input', showResetButton);
-  selects.forEach(s => s.addEventListener('change', showResetButton));
-  dates.forEach(i => i.addEventListener('change', showResetButton));
-
-  // panggil sekali saat load untuk set keadaan awal
-  showResetButton();
-});
 
 
   </script>  

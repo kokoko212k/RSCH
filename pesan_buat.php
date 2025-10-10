@@ -3,40 +3,23 @@ session_start();
 include 'config.php';
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-    // Ambil data dari form
     $no_surat = trim($_POST['no_surat'] ?? '');
     $pesan    = trim($_POST['pesan'] ?? '');
-    $toType   = $_POST['to_type'] ?? 'status'; // 'status' | 'nama'
 
-    // Ambil user dari session (pengirim)
     $user       = $_SESSION['user'] ?? [];
     $me_nik     = $user['nik']    ?? null;
     $me_nama    = $user['nama']   ?? '';
     $me_status  = $user['status'] ?? '';
+    $me_unit    = $user['unit']   ?? '';
+
+    $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
     if ($no_surat === '' || $pesan === '' || !$me_nik) {
-        header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=error&msg=Data%20tidak%20lengkap");
-        exit;
-    }
-
-    // Kumpulkan daftar penerima NIK
-    $recipients = [];
-    if ($toType === 'status') {
-        $toStatus = trim($_POST['to_status'] ?? '');
-        if ($toStatus !== '') {
-            $q = $pdo->prepare("SELECT nik FROM users WHERE status = ?");
-            $q->execute([$toStatus]);
-            $recipients = $q->fetchAll(PDO::FETCH_COLUMN);
+        if ($isAjax) {
+            header('Content-Type: application/json'); http_response_code(400);
+            echo json_encode(['ok'=>false,'error'=>'Data tidak lengkap']); exit;
         }
-    } else { // toType === 'nama'
-        $recipients = array_filter((array)($_POST['to_nama'] ?? []));
-    }
-
-    $recipients = array_values(array_unique(array_filter($recipients)));
-    $recipients = array_values(array_filter($recipients, fn($nik) => $nik !== $me_nik));    
-
-    if (empty($recipients)) {
-        header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=error&msg=Tidak%20ada%20penerima");
+        header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=error&msg=Data%20tidak%20lengkap");
         exit;
     }
 
@@ -45,43 +28,109 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         }
 
+        // 1) Ambil disposisi
+        $qPref = $pdo->prepare("
+            SELECT disposisi_kepada
+            FROM surat_disposisi_tindak_lanjut
+            WHERE no_surat = ?
+            ORDER BY id_tindaklanjut DESC
+            LIMIT 1
+        ");
+        $qPref->execute([$no_surat]);
+        $disposisi = trim((string)$qPref->fetchColumn());
+        if ($disposisi === '') throw new RuntimeException('disposisi_kepada kosong');
+
+        // 2) Pecah jadi list unit (normalisasi)
+        $rawUnits = preg_split('/[;,\/]+/u', $disposisi);
+        $targets = [];
+        foreach ($rawUnits as $s) {
+            $s = trim($s);
+            if ($s !== '') $targets[] = mb_strtoupper($s, 'UTF-8');
+        }
+        $targets = array_values(array_unique($targets));
+        if (!$targets) throw new RuntimeException('Unit target tidak valid');
+
+        // 3) Ambil user penerima berdasarkan unit (UPPER/TRIM)
+        $placeholders = implode(',', array_fill(0, count($targets), '?'));
+        $sqlUsers = "SELECT nik, nama, unit FROM users WHERE UPPER(TRIM(unit)) IN ($placeholders)";
+        $qUsers = $pdo->prepare($sqlUsers);
+        $qUsers->execute($targets);
+        $userRows = $qUsers->fetchAll(PDO::FETCH_ASSOC);
+
+        // 4) Kumpulkan NIK (tanpa diri sendiri) dan unique
+        $recipients = [];
+        foreach ($userRows as $row) {
+            if (!empty($row['nik']) && $row['nik'] !== $me_nik) {
+                $recipients[] = $row['nik'];
+            }
+        }
+        $recipients = array_values(array_unique($recipients));
+        if (!$recipients) throw new RuntimeException('Tidak ada penerima untuk unit tersebut');
+
+        // 5) Insert (dengan idempotency guard 5 detik)
         $pdo->beginTransaction();
 
-        // Statement insert 1 baris per penerima
+        // (opsional) buat hash idempotensi utk kombinasi inti
+        $idemStmt = $pdo->prepare("
+            SELECT COUNT(*) FROM pesan
+            WHERE no_surat=? AND pengirim_nik=? AND pesan=? AND waktu >= (NOW() - INTERVAL 5 SECOND)
+        ");
+        $idemStmt->execute([$no_surat, $me_nik, $pesan]);
+        if ((int)$idemStmt->fetchColumn() > 0) {
+            // sudah pernah dikirim barusan
+            $pdo->rollBack();
+            if ($isAjax) { header('Content-Type: application/json'); echo json_encode(['ok'=>true,'inserted'=>0,'dedup'=>true]); exit; }
+            header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=success");
+            exit;
+        }
+
         $ins = $pdo->prepare("
             INSERT INTO pesan
               (no_surat,
-               pengirim, pengirim_nik, pengirim_nama,
-               penerima, penerima_nik, penerima_nama,
+               pengirim_unit, pengirim_nik, pengirim_nama,
+               penerima_unit, penerima_nik, penerima_nama,
                pesan, waktu)
             SELECT :no_surat,
-                   :pengirim_label, :pengirim_nik, :pengirim_nama,
-                   COALESCE(u.status, '—'), u.nik, COALESCE(u.nama, ''),
+                   :pengirim_unit, :pengirim_nik, :pengirim_nama,
+                   COALESCE(u.unit, COALESCE(u.status,'—')), u.nik, COALESCE(u.nama, ''),
                    :pesan, NOW()
             FROM users u
             WHERE u.nik = :nik
         ");
 
+        $total = 0; // <-- WAJIB: inisialisasi
         foreach ($recipients as $nik) {
             $ins->execute([
                 ':no_surat'       => $no_surat,
-                ':pengirim_label' => ($me_status ?: $me_nama), // legacy label
+                ':pengirim_unit'  => ($me_unit ?: $me_status ?: $me_nama),
                 ':pengirim_nik'   => $me_nik,
                 ':pengirim_nama'  => $me_nama,
                 ':pesan'          => $pesan,
                 ':nik'            => $nik
             ]);
+            $total += $ins->rowCount();
+        }
+
+        if ($total === 0) {
+            $pdo->rollBack();
+            throw new RuntimeException('Tidak ada penerima valid');
         }
 
         $pdo->commit();
 
+        if ($isAjax) {
+            header('Content-Type: application/json'); echo json_encode(['ok'=>true,'inserted'=>$total]); exit;
+        }
         header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=success");
         exit;
+
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($isAjax) {
+            header('Content-Type: application/json', true, 400);
+            echo json_encode(['ok'=>false,'error'=>$e->getMessage()]); exit;
+        }
         header("Location: pesan_lihat.php?id=" . urlencode($no_surat) . "&status=error&msg=" . urlencode($e->getMessage()));
         exit;
     }
 }
-
-

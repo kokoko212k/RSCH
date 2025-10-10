@@ -11,7 +11,40 @@ if (!isset($_SESSION['user'])) {
 
 $user = $_SESSION['user'];
 $role = $user['status'] ?? null;
-$can_access_eoffice = in_array($role, ['Sekretariat', 'Super Admin']);
+$eofficeAll = [
+  'surat_masuk.php'                   => 'Surat Masuk',
+  'surat_keluar.php'                  => 'Surat Keluar',
+  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
+  'surat_disposisi.php'               => 'Disposisi Surat',
+  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
+  'surat_notif.php'                   => 'Surat Notif',
+  'surat_pengajuan.php'               => 'Pengajuan',
+];
+
+$rolePages = [
+  'Super Admin' => array_keys($eofficeAll), // semua
+  'Sekretariat' => [
+    'surat_masuk.php',
+    'surat_keluar.php',
+    'surat_disposisi_pengajuan.php',
+  ],
+  'Direktur' => [
+    'surat_disposisi.php',
+    'surat_notif.php',
+  ],
+  'Admin' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+  'Member' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+];
+
+// Tentukan halaman yang boleh tampil untuk role saat ini
+$allowedEofficePages = $rolePages[$role] ?? [];
+$can_access_eoffice  = !empty($allowedEofficePages);
 $pengirim   = $user['nama'] ?? '';
 
 // ----------- Hapus notifikasi -----------
@@ -115,28 +148,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
 }
 
 // ================== Ambil data untuk TABEL ==================
+// ================== Ambil data untuk TABEL ==================
 $semuaNotif = [];
 try {
-    // kalau mau tampil semua notif:
-    $q = "SELECT id, tanggal, no_surat, file_url, waktu 
-          FROM surat_notif 
-          ORDER BY waktu DESC, id DESC";
+    $q = "
+        SELECT 
+            n.id, n.tanggal, n.no_surat, n.file_url, n.waktu,
+            COALESCE(MAX(NULLIF(tl.disposisi_kepada,'')), '') AS disposisi_kepada
+        FROM surat_notif n
+        LEFT JOIN surat_disposisi_tindak_lanjut tl 
+               ON tl.no_surat = n.no_surat
+        GROUP BY n.id, n.tanggal, n.no_surat, n.file_url, n.waktu
+        ORDER BY n.waktu DESC, n.id DESC
+    ";
     $stmt = $pdo->query($q);
     $semuaNotif = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // $stmt = $pdo->prepare("
-    //     SELECT n.id, n.tanggal, n.no_surat, n.file_url, n.waktu
-    //     FROM surat_notif n
-    //     JOIN surat_masuk m ON m.no_surat = n.no_surat
-    //     WHERE m.disposisi_kepada = :namaUser
-    //     ORDER BY n.waktu DESC, n.id DESC
-    // ");
-    // $stmt->execute(['namaUser' => $user['nama'] ?? '']);
-    // $semuaNotif = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
 } catch (Exception $e) {
     $semuaNotif = [];
 }
+
+$opsiNoSurat  = array_values(array_unique(array_filter(array_column($semuaNotif, 'no_surat'))));
+sort($opsiNoSurat, SORT_NATURAL | SORT_FLAG_CASE);
+
+$opsiTanggal  = array_values(array_unique(array_filter(array_column($semuaNotif, 'tanggal'))));
+// kalau mau urut terbaru dulu:
+rsort($opsiTanggal);
 ?>
 
 
@@ -556,6 +592,36 @@ try {
     text-align: right;
 }
 
+/* ===== Dropdown filter header: tabel Notif Surat ===== */
+#tabelSuratNotif th .no-export select {
+  width: 20px;
+  font-size: 13px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #fff;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+#tabelSuratNotif th .no-export input[type="date"] {
+  width: 20px;
+  font-size: 13px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #fff;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+#tabelSuratNotif th .no-export select {
+  outline: none;
+  border-color: #5b9bff;
+  box-shadow: 0 0 0 3px rgba(91,155,255,.15);
+}
+#tabelSuratNotif th .no-export { 
+  margin-top: 6px;
+}
+
 </style>
 <body>
   <!-- Latar Belakang -->
@@ -610,19 +676,14 @@ try {
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -659,19 +720,41 @@ try {
 <div class="table-container">
     <table id="tabelSuratNotif" border="1" cellpadding="10" cellspacing="0">
         <thead>
-            <tr>
-                <th>Tanggal</th>
-                <th>No Surat</th>
-                <th>File</th>
-                <th>Chat</th>
-                <th>Aksi</th>
-            </tr>
+          <tr>
+            <th>
+              Tanggal
+              <div class="no-export">
+                <input
+                  type="date"
+                  id="flt-notif-tanggal"
+                  onchange="applyNotifFilters(); showNotifReset();"
+                />
+              </div>
+            </th>
+            <th>
+              No Surat
+              <div class="no-export">
+                <select id="flt-notif-nosurat" onchange="applyNotifFilters(); showNotifReset();">
+                  <option value=""></option>
+                  <?php foreach ($opsiNoSurat as $ns): ?>
+                    <option value="<?= htmlspecialchars($ns) ?>"><?= htmlspecialchars($ns) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </th>
+            <th>File</th>
+            <th>Chat</th>
+            <th>Aksi</th>
+          </tr>
         </thead>
         <tbody>
         <?php if (!empty($semuaNotif)): ?>
             <?php foreach ($semuaNotif as $row): ?>
-                <tr class="data-row" data-id="<?= htmlspecialchars($row['id']) ?>">
-                    <td><?= htmlspecialchars($row['tanggal'] ?? '') ?></td>
+                <tr class="data-row" 
+                data-id="<?= htmlspecialchars($row['id']) ?>"
+                data-tanggal="<?= htmlspecialchars($row['tanggal'] ?? '') ?>"
+                data-no_surat="<?= htmlspecialchars($row['no_surat'] ?? '') ?>">
+                <td><?= htmlspecialchars($row['tanggal'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['no_surat'] ?? '') ?></td>
                     <td>
                         <?php if (!empty($row['file_url'])): ?>
@@ -679,21 +762,23 @@ try {
                         <?php else: ?>-<?php endif; ?>
                     </td>
                     <td>
-                    <button class="btn-chat"
-                            data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"
-                            onclick="toggleChatBoxFromBtn(this)">💬</button>
-                  </td>
+                      <?php if (!empty($row['disposisi_kepada'])): ?>
+                        <a class="btn-chat" href="pesan_lihat.php?no_surat=<?= urlencode($row['no_surat']) ?>">💬</a>
+                      <?php else: ?>
+                        <button class="btn-chat" disabled title="Isi disposisi dulu">💬</button>
+                      <?php endif; ?>
+                    </td>
                     <td>
                         <a href="update_surat_notif.php?id=<?= urlencode($row['id']) ?>">✏️</a><br>
                         <a href="surat_notif.php?delete=<?= urlencode($row['id']) ?>" onclick="return confirm('Hapus surat ini?')">🗑️</a>
                     </td>
                 </tr>
                 <tr id="chatbox-<?= htmlspecialchars($row['no_surat']) ?>"
-                    data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"
+                    data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>"
                     style="display:none;">
                   <td colspan="5">
-                    <div class="chat-box" data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"></div>
-                    <form class="form-chat" data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>" method="POST">
+                    <div class="chat-box" data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>"></div>
+                    <form class="form-chat" data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>" method="POST">
                       <input type="hidden" name="pengirim" value="<?= htmlspecialchars($user['nama'] ?? '') ?>">
                       <input type="hidden" name="penerima" value="<?= ($user['status'] === 'Super Admin' ? 'Sekretariat' : 'Super Admin') ?>">
                       <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
@@ -787,14 +872,22 @@ function loadSuratNotif() {
     });
 }
 
-  const userIcon = document.querySelector(".user-icon");
-  const userMenu = document.getElementById("userMenu");
-  if (userIcon) {
-    userIcon.addEventListener("click", function (e) {
-      e.stopPropagation();
-      userMenu.style.display = userMenu.style.display === "block" ? "none" : "block";
-    });
-  }
+(function initUserMenu(){
+  if (window.__userMenuInit) return;           // guard supaya tidak dobel
+  window.__userMenuInit = true;
+
+  const icon = document.querySelector('.user-icon');
+  const menu = document.getElementById('userMenu');
+  if (!icon || !menu) return;
+
+  icon.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.style.display = (menu.style.display === 'block' ? 'none' : 'block');
+  });
+  document.addEventListener('click', (e) => {
+    if (!icon.contains(e.target)) menu.style.display = 'none';
+  });
+})();
 
   document.addEventListener("click", function (e) {
     if (userMenu && !userIcon.contains(e.target)) {
@@ -1039,6 +1132,59 @@ function editPesan(idPesan, isiLama) {
   }
 }
 
+function showNotifReset(){
+  const hasTgl = !!(document.getElementById('flt-notif-tanggal')?.value || '');
+  const hasNo  = !!(document.getElementById('flt-notif-nosurat')?.value || '');
+  const box = document.getElementById('reset-container');
+  if (box) box.style.display = (hasTgl || hasNo) ? 'block' : 'none';
+}
+
+function applyNotifFilters(){
+  const vTgl = (document.getElementById('flt-notif-tanggal')?.value || '').toLowerCase();
+  const vNo  = (document.getElementById('flt-notif-nosurat')?.value || '').toLowerCase();
+
+  document.querySelectorAll('#tabelSuratNotif .data-row').forEach(tr => {
+    const tTgl = (tr.getAttribute('data-tanggal') || '').toLowerCase();
+    const tNo  = (tr.getAttribute('data-no_surat') || '').toLowerCase();
+
+    let visible = true;
+
+    // robust utk 'YYYY-MM-DD' *atau* 'YYYY-MM-DD HH:MM:SS'
+    if (vTgl && tTgl.slice(0,10) !== vTgl) visible = false;
+
+    // kalau mau lebih longgar lagi: if (vTgl && !tTgl.startsWith(vTgl)) visible = false;
+
+    if (vNo && !tNo.includes(vNo)) visible = false;
+
+    tr.style.display = visible ? 'table-row' : 'none';
+
+    const chatRow = tr.nextElementSibling;
+    if (chatRow && chatRow.id?.startsWith('chatbox-') && !visible) chatRow.style.display = 'none';
+  });
+}
+
+
+// Extend resetFilters() agar juga reset datepicker Notif
+(function(){
+  const oldReset = window.resetFilters;
+  window.resetFilters = function(){
+    if (typeof oldReset === 'function') oldReset();
+
+    const dt = document.getElementById('flt-notif-tanggal');
+    const ns = document.getElementById('flt-notif-nosurat');
+    if (dt) dt.value = '';
+    if (ns) ns.selectedIndex = 0;
+
+    document.querySelectorAll('#tabelSuratNotif .data-row')
+      .forEach(tr => tr.style.display = 'table-row');
+
+    showNotifReset();
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', () => {
+  showNotifReset();
+});
   </script>
 </body>
 </html>    

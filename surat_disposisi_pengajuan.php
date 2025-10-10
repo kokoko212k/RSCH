@@ -5,8 +5,40 @@ include 'config.php';
 $user = $_SESSION['user'] ?? null;
 $user_id = $user['user']['id'] ?? null;
 $role = $user['status'] ?? null;
-$can_access_eoffice = in_array($role, ['Sekretariat', 'Super Admin']);
+$eofficeAll = [
+  'surat_masuk.php'                   => 'Surat Masuk',
+  'surat_keluar.php'                  => 'Surat Keluar',
+  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
+  'surat_disposisi.php'               => 'Disposisi Surat',
+  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
+  'surat_notif.php'                   => 'Surat Notif',
+  'surat_pengajuan.php'               => 'Pengajuan',
+];
 
+$rolePages = [
+  'Super Admin' => array_keys($eofficeAll), // semua
+  'Sekretariat' => [
+    'surat_masuk.php',
+    'surat_keluar.php',
+    'surat_disposisi_pengajuan.php',
+  ],
+  'Direktur' => [
+    'surat_disposisi.php',
+    'surat_notif.php',
+  ],
+  'Admin' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+  'Member' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+];
+
+// Tentukan halaman yang boleh tampil untuk role saat ini
+$allowedEofficePages = $rolePages[$role] ?? [];
+$can_access_eoffice  = !empty($allowedEofficePages);
 date_default_timezone_set('Asia/Jakarta');
 $tanggal_hari_ini = date('Y-m-d');
 
@@ -179,6 +211,7 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
   <link rel="stylesheet" href="style.css" />
   <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <style>
   @media print {
@@ -603,19 +636,14 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -781,70 +809,86 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
   });
   }
 function exportTableToExcel() {
-    var table = document.getElementById("tabelSuratDisposisiPengajuan").cloneNode(true);
+  if (typeof XLSX === 'undefined') {
+    alert('Library XLSX belum dimuat. Pastikan xlsx.full.min.js sudah di-include.');
+    return;
+  }
 
-    // Hapus elemen no-export
-    var filters = table.querySelectorAll(".no-export");
-    filters.forEach(filter => filter.remove());
+  const table = document.getElementById('tabelSuratDisposisiPengajuan');
+  if (!table) { alert('Tabel tidak ditemukan.'); return; }
 
-    var headers = table.querySelectorAll("th");
-    var removeIndexes = [];
+  // --- Kumpulkan index kolom yang perlu dibuang (File, Aksi) ---
+  const headerRow = table.querySelector('thead tr');
+  if (!headerRow) { alert('Header tabel tidak ditemukan.'); return; }
+  const ths = Array.from(headerRow.querySelectorAll('th'));
 
-    // Cari index kolom yang mau dihapus
-    headers.forEach((cell, index) => {
-        var text = cell.childNodes[0].textContent.trim(); // ⬅️ Ambil hanya teks label
-        if (text === "Aksi" || text === "File") {
-            removeIndexes.push(index);
-        }
-    });
+  const removeIdx = [];
+  const headers = [];
 
-    // Ambil header (ambil teks node pertama saja)
-    var headerCells = table.querySelectorAll('tr')[0].querySelectorAll('th');
-    var headersArray = [];
-
-    headerCells.forEach((cell, index) => {
-        if (!removeIndexes.includes(index)) {
-            headersArray.push(cell.childNodes[0].textContent.trim()); // ⬅️ Ini kunci
-        }
-    });
-
-    // Ambil data isi
-    var bodyRows = table.querySelectorAll('tr');
-    var dataArray = [];
-
-    // Mulai dari baris kedua (index 1), baris pertama adalah header
-    for (var i = 1; i < bodyRows.length; i++) {
-        var row = bodyRows[i];
-        var rowData = [];
-        var cells = row.querySelectorAll('td');
-        cells.forEach((cell, index) => {
-            if (!removeIndexes.includes(index)) {
-                rowData.push(cell.textContent.trim());
-            }
-        });
-        if (rowData.length > 0) { // Hindari baris kosong
-            dataArray.push(rowData);
-        }
+  ths.forEach((th, idx) => {
+    const label = (th.childNodes[0]?.textContent || th.textContent || '').trim();
+    if (label === 'File' || label === 'Aksi') {
+      removeIdx.push(idx);
+    } else {
+      headers.push(label);
     }
+  });
 
-    // Gabungkan header dan data
-    var exportData = [headersArray, ...dataArray];
+  // --- Ambil data baris yang terlihat saja ---
+  const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+  const data = [];
 
-    // Buat file Excel
-    var ws = XLSX.utils.aoa_to_sheet(exportData);
-    ws['!cols'] = [
-        { wch: 15 }, // Tanggal 
-        { wch: 15 }, // No. Surat
-        { wch: 30 }, // Dari
-        { wch: 15 }, // Instruksi
-        { wch: 15 }, // Status
-    ];
+  bodyRows.forEach(tr => {
+    // Hanya ekspor yang terlihat (display != none)
+    const isHidden = window.getComputedStyle(tr).display === 'none';
+    if (isHidden) return;
 
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "surat disposisi pengajuan");
+    const tds = Array.from(tr.querySelectorAll('td'));
+    if (!tds.length) return;
 
-    XLSX.writeFile(wb, "surat disposisi pergajuan.xlsx");
-    alert("Data berhasil diekspor!");
+    const row = [];
+
+    tds.forEach((td, idx) => {
+      if (removeIdx.includes(idx)) return;
+
+      // Khusus kolom Instruksi: ambil dari span label jika ada
+      const spanLabel = td.querySelector('[id^="label-instruksi-"]');
+      let text;
+      if (spanLabel) {
+        text = spanLabel.textContent.trim();
+      } else {
+        // fallback umum: ambil textContent cell (tanpa newline berlebih)
+        text = (td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
+      }
+      row.push(text);
+    });
+
+    // Hindari push baris kosong
+    if (row.some(v => v !== '')) data.push(row);
+  });
+
+  // Gabungkan header + data
+  const aoa = [headers, ...data];
+
+  // Buat sheet
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Lebar kolom dinamis (perkiraan berdasarkan panjang header)
+  ws['!cols'] = [
+    { wch: 6 },   // No
+    { wch: 20 },  // No. Surat
+    { wch: 14 },  // Tanggal
+    { wch: 28 },  // Dari
+    { wch: 20 },  // Instruksi
+    { wch: 20 },  // Status
+  ];
+
+  // Buat workbook & tulis file
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'surat disposisi pengajuan');
+  XLSX.writeFile(wb, 'surat_disposisi_pengajuan.xlsx');
+
+  alert('Data berhasil diekspor!');
 }
 
 

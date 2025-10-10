@@ -149,6 +149,7 @@ try {
   <link rel="stylesheet" href="style.css" />
   <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <style>
   @media print {
@@ -678,24 +679,28 @@ try {
                         <?php else: ?>-<?php endif; ?>
                     </td>
                     <td>
-                        <button onclick="toggleChatBox('<?= htmlspecialchars($row['no_surat']) ?>')">💬</button>
-                    </td>
+                    <button class="btn-chat"
+                            data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"
+                            onclick="toggleChatBoxFromBtn(this)">💬</button>
+                  </td>
                     <td>
                         <a href="update_surat_notif.php?id=<?= urlencode($row['id']) ?>">✏️</a><br>
                         <a href="surat_notif.php?delete=<?= urlencode($row['id']) ?>" onclick="return confirm('Hapus surat ini?')">🗑️</a>
                     </td>
                 </tr>
-                <tr id="chatbox-<?= htmlspecialchars($row['no_surat']) ?>" data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>" style="display:none;">
-                    <td colspan="6">
-                        <div class="chat-box" data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>"></div>
-                        <form class="form-chat" data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>" method="POST">
-                            <input type="hidden" name="pengirim" value="<?= htmlspecialchars($user['status'] ?? '') ?>">
-                            <input type="hidden" name="penerima" value="<?= ($user['status'] === 'Super Admin' ? 'Sekretariat' : 'Super Admin') ?>">
-                            <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
-                            <textarea name="pesan" placeholder="Ketik pesan..." required style="width:50%;"></textarea>
-                            <button type="submit">Kirim</button>
-                        </form>
-                    </td>
+                <tr id="chatbox-<?= htmlspecialchars($row['no_surat']) ?>"
+                    data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"
+                    style="display:none;">
+                  <td colspan="5">
+                    <div class="chat-box" data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>"></div>
+                    <form class="form-chat" data-no-surat="<?= htmlspecialchars($row['no_surat']) ?>" method="POST">
+                      <input type="hidden" name="pengirim" value="<?= htmlspecialchars($user['nama'] ?? '') ?>">
+                      <input type="hidden" name="penerima" value="<?= ($user['status'] === 'Super Admin' ? 'Sekretariat' : 'Super Admin') ?>">
+                      <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
+                      <textarea name="pesan" placeholder="Ketik pesan..." required style="width: 50%;"></textarea>
+                      <button type="submit">Kirim</button>
+                    </form>
+                  </td>
                 </tr>
             <?php endforeach; ?>
         <?php else: ?>
@@ -781,9 +786,6 @@ function loadSuratNotif() {
         });
     });
 }
-
-// Panggil saat halaman load
-document.addEventListener("DOMContentLoaded", loadSuratNotif);
 
   const userIcon = document.querySelector(".user-icon");
   const userMenu = document.getElementById("userMenu");
@@ -915,111 +917,128 @@ function searchTable() {
   }
 }
 
-
-function toggleChatBox(noSurat) {
-    const row = document.getElementById('chatbox-' + noSurat);
-    const chatBox = row.querySelector('.chat-box');
-    row.style.display = row.style.display === 'none' ? '' : 'none';
-
-    if (row.style.display !== 'none') {
-        loadChat(noSurat, chatBox); 
-    }
-}
-
 function loadChat(noSurat, container) {
-    fetch(`pesan_lihat.php?no_surat=${noSurat}`)
-        .then(res => res.text())
-        .then(html => {
-            container.innerHTML = html;
-            container.scrollTop = container.scrollHeight;
-        });
+  const url = 'pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat);
+  container.innerHTML = '<div style="opacity:.6">Memuat percakapan...</div>';
+
+  fetch(url, {
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(async res => {
+    const text = await res.text();
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + text.slice(0, 200));
+    return text;
+  })
+  .then(html => {
+    container.innerHTML = html && html.trim()
+      ? '<div class="chat-container">' + html + '</div>'
+      : '<div style="opacity:.6">Belum ada pesan.</div>';
+    container.scrollTop = container.scrollHeight;
+  })
+  .catch(err => {
+    container.innerHTML = '<div style="color:#b00020">Gagal memuat chat: ' + err.message + '</div>';
+  });
 }
 
-function sendChat(e, noSurat) {
-    e.preventDefault();
-    const form = e.target;
-    const pesan = form.pesan.value;
-    const pengirim = form.pengirim.value;
-    
-    fetch('pesan_buat.php', {
+// Toggle membuka/menutup baris chat tepat di bawah baris data
+function toggleChatBoxFromBtn(btn) {
+  const dataRow = btn.closest('tr');
+  if (!dataRow) return;
+
+  const chatRow = dataRow.nextElementSibling; // baris setelahnya
+  if (!chatRow) return;
+
+  const chatBox = chatRow.querySelector('.chat-box');
+  if (!chatBox) return;
+
+  const willOpen = (chatRow.style.display === 'none' || !chatRow.style.display);
+  chatRow.style.display = willOpen ? 'table-row' : 'none';
+
+  if (willOpen) {
+    const noSurat = btn.dataset.noSurat || chatRow.dataset.noSurat || dataRow.dataset.noSurat;
+    if (noSurat) loadChat(noSurat, chatBox);
+  }
+}
+
+// Submit form chat via AJAX
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.form-chat').forEach(form => {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      const noSurat = form.dataset.noSurat;
+      const chatRow = form.closest('tr');
+      const chatBox = chatRow.querySelector('.chat-box');
+
+      fetch('pesan_buat.php', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `no_surat=${encodeURIComponent(noSurat)}&pengirim=${encodeURIComponent(pengirim)}&pesan=${encodeURIComponent(pesan)}`
-    }).then(() => {
-        form.pesan.value = '';
-        loadChat(noSurat);
+        body: formData
+      })
+      .then(res => res.text())
+      .then(() => {
+        form.reset();
+        loadChat(noSurat, chatBox);
+      })
+      .catch(err => {
+        alert('Gagal mengirim pesan: ' + err.message);
+      });
     });
-}
-
-function initialChat() {
-    const noSurat = document.querySelector('input[name="no_surat"]').value;
-    const chatBox = document.getElementById('chat-box');
-    fetch('pesan_lihat.php?no_surat=' + noSurat)
-        .then(res => res.text())
-        .then(data => {
-            chatBox.innerHTML = data;
-            chatBox.scrollTop = chatBox.scrollHeight;
-        });
-}
-
-document.querySelectorAll('.form-chat').forEach(form => {
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-
-        const formData = new FormData(form);
-        const noSurat = form.dataset.noSurat;
-        const chatBox = document.querySelector(`#chatbox-${noSurat} #chat-box`);
-
-        fetch('pesan_buat.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.text())
-        .then(() => {
-            form.reset();
-            loadChat(noSurat, chatBox);
-        });
-    });
+  });
 });
 
-setInterval(function() {
-    document.querySelectorAll('[id^="chatbox-"]').forEach(function(chatbox) {
-        const noSurat = chatbox.dataset.noSurat;
-        const chatBoxDiv = chatbox.querySelector('.chat-box');
-        if (noSurat && chatBoxDiv) {
-            fetch('pesan_lihat.php?no_surat=' + noSurat)
-            .then(response => response.text())
-            .then(html => {
-                chatBoxDiv.innerHTML = html;
-                chatBoxDiv.scrollTop = chatBoxDiv.scrollHeight;
-            });
-        }
-    });
+// Auto-refresh 10 detik SEKALI, hanya untuk chatbox yang TERBUKA
+setInterval(function () {
+  document.querySelectorAll('[id^="chatbox-"]').forEach(function (chatRow) {
+    if (chatRow.style.display === 'none') return; // hanya yang terlihat
+    const noSurat = chatRow.dataset.noSurat;
+    const chatBoxDiv = chatRow.querySelector('.chat-box');
+    if (noSurat && chatBoxDiv) {
+      fetch('pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat))
+      .then(r => r.text())
+      .then(html => {
+        chatBoxDiv.innerHTML = html && html.trim()
+          ? '<div class="chat-container">' + html + '</div>'
+          : '<div style="opacity:.6">Belum ada pesan.</div>';
+        chatBoxDiv.scrollTop = chatBoxDiv.scrollHeight;
+      })
+      .catch(()=>{ /* diamkan agar tidak ganggu UI */ });
+    }
+  });
 }, 10000);
 
+// Edit pesan (opsional, panggil dari HTML di pesan_lihat.php)
 function editPesan(idPesan, isiLama) {
-    const pesanBaru = prompt("Edit pesan:", isiLama);
-    if (pesanBaru && pesanBaru !== isiLama) {
-        fetch("pesan_edit.php", {
-            method: "POST",
-            headers: {"Content-Type": "application/x-www-form-urlencoded"},
-            body: "id_pesan=" + encodeURIComponent(idPesan) +
-                  "&pesan_baru=" + encodeURIComponent(pesanBaru)
-        })
-        .then(res => res.text())
-        .then(msg => {
-            if (msg.toLowerCase().includes("berhasil")) {
-                alert("Pesan berhasil diedit");
-                // kalau mau refresh chat box, panggil ulang loadChat() di sini
-            } else {
-                alert("Gagal mengedit pesan: " + msg);
-            }
-        })
-        .catch(err => {
-            alert("Terjadi kesalahan: " + err);
-        });
-    }
+  const pesanBaru = prompt("Edit pesan:", isiLama);
+  if (pesanBaru && pesanBaru !== isiLama) {
+    fetch("pesan_edit.php", {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: "id_pesan=" + encodeURIComponent(idPesan) +
+            "&pesan_baru=" + encodeURIComponent(pesanBaru)
+    })
+    .then(res => res.text())
+    .then(msg => {
+      if (msg.toLowerCase().includes("berhasil")) {
+        alert("Pesan berhasil diedit");
+        // reload chat yang sedang terbuka
+        const openRow = document.querySelector('[id^="chatbox-"]:not([style*="display: none"])');
+        if (openRow) {
+          const noSurat = openRow.dataset.noSurat;
+          const chatBoxDiv = openRow.querySelector('.chat-box');
+          if (noSurat && chatBoxDiv) loadChat(noSurat, chatBoxDiv);
+        }
+      } else {
+        alert("Gagal mengedit pesan: " + msg);
+      }
+    })
+    .catch(err => {
+      alert("Terjadi kesalahan: " + err.message);
+    });
+  }
 }
+
   </script>
 </body>
 </html>    
