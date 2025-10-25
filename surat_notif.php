@@ -1,5 +1,88 @@
 <?php
 session_start();
+function buat_notif_dari_surat_notif(PDO $pdo, int $suratNotifId): void
+{
+    // Ambil baris surat_notif + info kepemilikan dari surat_pengajuan
+    $q = $pdo->prepare("
+        SELECT n.id, n.no_surat, n.file_url, n.tanggal, n.waktu,
+               sp.pengajuan_nik, sp.pengajuan_unit
+        FROM surat_notif n
+        LEFT JOIN surat_pengajuan sp ON sp.no_surat = n.no_surat
+        WHERE n.id = ?
+        LIMIT 1
+    ");
+    $q->execute([$suratNotifId]);
+    $r = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$r) return;
+
+    $no_surat = (string)($r['no_surat'] ?? '');
+    $file_url = (string)($r['file_url'] ?? '');
+    $nik      = (string)($r['pengajuan_nik'] ?? '');
+    $unit     = (string)($r['pengajuan_unit'] ?? '');
+
+    // 1) Insert ke notifikasi (hindari duplikat via UNIQUE event_key)
+    $title = 'Surat baru/diteruskan';
+    $body  = $no_surat !== '' ? ('No. Surat: ' . $no_surat) : null;
+    $actionUrl = $no_surat !== '' ? ('surat_notif.php?no_surat=' . rawurlencode($no_surat)) : 'surat_notif.php';
+    $eventKey  = 'surat_notif:' . $suratNotifId;
+
+    $insNotif = $pdo->prepare("
+        INSERT INTO notifikasi (title, body, action_url, type, event_key, created_by)
+        VALUES (:title, :body, :url, 'surat_notif', :ek, NULL)
+        ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)  -- ambil id lama kalau sudah ada
+    ");
+    $insNotif->execute([
+        ':title' => $title,
+        ':body'  => $body,
+        ':url'   => $actionUrl,
+        ':ek'    => $eventKey,
+    ]);
+    $notifId = (int)$pdo->lastInsertId();
+    if ($notifId <= 0) return;
+
+    // 2) Cari target penerima
+    //    - Super Admin: semua
+    //    - Sekretariat: sesuai unit surat
+    //    - Pemilik (nik): user yang nik = pengajuan_nik
+    // NOTE: sesuaikan nama tabel/kolom users dengan punyamu
+    $userIds = [];
+
+    // Super Admin
+    $st = $pdo->query("SELECT id FROM users WHERE status='Super Admin'");
+    $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+
+    // Sekretariat unit sama
+    if ($unit !== '') {
+        $st = $pdo->prepare("SELECT id FROM users WHERE status='Sekretariat' AND unit = ?");
+        $st->execute([$unit]);
+        $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    // Pemilik berdasarkan NIK
+    if ($nik !== '') {
+        $st = $pdo->prepare("SELECT id FROM users WHERE nik = ?");
+        $st->execute([$nik]);
+        $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    // Bersihkan duplikat
+    $userIds = array_values(array_unique(array_filter($userIds, fn($v)=>$v>0)));
+
+    if (!$userIds) return;
+
+    // 3) Masukkan ke notifikasi_targets (hindari dobel)
+    $insT = $pdo->prepare("
+        INSERT IGNORE INTO notifikasi_targets (notifikasi_id, user_id, status, unit)
+        VALUES (?, ?, NULL, ?)
+    ");
+    foreach ($userIds as $uid) {
+        $insT->execute([$notifId, $uid, ($unit ?: null)]);
+        // Optional: inisialisasi detail_notifikasi (status unread)
+        $pdo->prepare("INSERT IGNORE INTO detail_notifikasi (notifikasi_id, user_id, read_at) VALUES (?, ?, NULL)")
+            ->execute([$notifId, $uid]);
+    }
+}
+
 require 'config.php';
 date_default_timezone_set('Asia/Jakarta');
 
@@ -47,6 +130,67 @@ $allowedEofficePages = $rolePages[$role] ?? [];
 $can_access_eoffice  = !empty($allowedEofficePages);
 $pengirim   = $user['nama'] ?? '';
 
+
+// ================== SYNC "DITERUSKAN LANGSUNG" KE NOTIF ==================
+try {
+    // --- blok lama: DITERUSKAN LANGSUNG -> surat_notif ---
+    $q = $pdo->prepare("
+        SELECT tanggal, no_surat, file_url
+        FROM surat_disposisi
+        WHERE LOWER(instruksi) = 'diteruskan langsung'
+    ");
+    $q->execute();
+    foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $stored = trim((string)$r['file_url']);
+        if ($stored !== '' && strpos($stored, '/') === false) $stored = 'uploads/' . $stored;
+
+        $cek = $pdo->prepare("SELECT COUNT(*) FROM surat_notif WHERE no_surat=? AND file_url=?");
+        $cek->execute([$r['no_surat'], $stored]);
+        if (!$cek->fetchColumn()) {
+            $ins = $pdo->prepare("
+                INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu)
+                VALUES (?, ?, ?, NOW())
+            ");
+            $ins->execute([$r['tanggal'], $r['no_surat'], $stored]);
+            $baruId = (int)$pdo->lastInsertId();
+            if ($baruId) buat_notif_dari_surat_notif($pdo, $baruId);
+        }
+    }
+
+    // --- tambah baru: DITERUSKAN (khusus yang berasal dari surat_keluar) -> surat_notif ---
+    $q2 = $pdo->prepare("
+        SELECT d.tanggal,
+               d.no_surat,
+               COALESCE(NULLIF(d.file_url,''), sk.file_url) AS file_url
+        FROM surat_disposisi d
+        JOIN surat_keluar sk
+          ON sk.no_surat = d.no_surat
+         AND (
+              d.ditujukan_kepada IS NULL
+              OR d.ditujukan_kepada = ''
+              OR sk.ditujukan_kepada = d.ditujukan_kepada
+         )
+        WHERE LOWER(d.instruksi) = 'diteruskan'
+    ");
+    $q2->execute();
+    foreach ($q2->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $stored = trim((string)$r['file_url']);
+        if ($stored !== '' && strpos($stored, '/') === false) $stored = 'uploads/' . $stored;
+
+        $cek = $pdo->prepare("SELECT COUNT(*) FROM surat_notif WHERE no_surat=? AND file_url=?");
+        $cek->execute([$r['no_surat'], $stored]);
+        if (!$cek->fetchColumn()) {
+            $ins = $pdo->prepare("
+                INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu)
+                VALUES (?, ?, ?, NOW())
+            ");
+            $ins->execute([$r['tanggal'], $r['no_surat'], $stored]);
+        }
+    }
+} catch (Throwable $e) {
+    // optional: log error
+}
+
 // ----------- Hapus notifikasi -----------
 if (isset($_GET['delete'])) {
     $id = (int)($_GET['delete']);
@@ -69,6 +213,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'inser
     if ($no_surat !== '') {
         $stmt = $pdo->prepare("INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu) VALUES (?, ?, ?, NOW())");
         $stmt->execute([$tanggal, $no_surat, $file_url]);
+        $baruId = (int)$pdo->lastInsertId();
+        if ($baruId) buat_notif_dari_surat_notif($pdo, $baruId);
         echo "OK";
     } else {
         echo "ERROR: Data tidak lengkap";
@@ -117,34 +263,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
     exit;
 }
 
-// Update disposisi -> otomatis buat notifikasi
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) {
-    $id                 = $_POST['id'] ?? null;
-    $disposisi_kepada   = $_POST['disposisi_kepada'] ?? null;
-    $tanggal_disposisi  = $_POST['tanggal_disposisi'] ?? date('Y-m-d');
+    $id = (int)($_POST['id'] ?? 0);
+    $disposisi_kepada  = trim($_POST['disposisi_kepada'] ?? '');
+    $tanggal_disposisi = $_POST['tanggal_disposisi'] ?? date('Y-m-d');
 
-    if ($id && $disposisi_kepada) {
-        $stmt = $pdo->prepare("UPDATE surat_masuk 
-                               SET disposisi_kepada = :disposisi_kepada, tanggal_disposisi = :tanggal_disposisi 
-                               WHERE id = :id");
-        $stmt->execute([
-            'disposisi_kepada'  => $disposisi_kepada,
-            'tanggal_disposisi' => $tanggal_disposisi,
-            'id'                => $id
-        ]);
+    if ($id > 0 && $disposisi_kepada !== '') {
+        // ...update surat_masuk...
 
-        // Ambil sumber data untuk notif
-        $stmtGet = $pdo->prepare("SELECT no_surat, file_url FROM surat_masuk WHERE id = ?");
-        $stmtGet->execute([$id]);
-        $row = $stmtGet->fetch(PDO::FETCH_ASSOC);
+        // Ambil no_surat & file_url dari sumber yang valid (mis. surat_masuk)
+        $get = $pdo->prepare("SELECT no_surat, file_url FROM surat_masuk WHERE id=?");
+        $get->execute([$id]);
+        $row = $get->fetch(PDO::FETCH_ASSOC);
 
         if ($row) {
-            $stmtNotif = $pdo->prepare("INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu) VALUES (?, ?, ?, NOW())");
-            $stmtNotif->execute([date('Y-m-d'), $row['no_surat'], $row['file_url']]);
+            $stored_file = trim((string)$row['file_url']);
+            if ($stored_file !== '' && strpos($stored_file, '/') === false) {
+                $stored_file = 'uploads/' . $stored_file;
+            }
+
+            $stmtNotif = $pdo->prepare("
+                INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu)
+                VALUES (:tanggal, :no_surat, :file_url, NOW())
+            ");
+            $stmtNotif->execute([
+              'tanggal'  => $tanggal_disposisi,
+              'no_surat' => $row['no_surat'],
+              'file_url' => $stored_file,
+            ]);
+            $baruId = (int)$pdo->lastInsertId();
+            if ($baruId) buat_notif_dari_surat_notif($pdo, $baruId);
         }
     }
-    // boleh exit di sini bila endpoint dipanggil via AJAX
-    // exit;
+    // exit kalau ini endpoint AJAX
 }
 
 // ================== Ambil data untuk TABEL ==================
@@ -173,9 +324,30 @@ sort($opsiNoSurat, SORT_NATURAL | SORT_FLAG_CASE);
 $opsiTanggal  = array_values(array_unique(array_filter(array_column($semuaNotif, 'tanggal'))));
 // kalau mau urut terbaru dulu:
 rsort($opsiTanggal);
+
+function url_file($s) {
+  $s = trim((string)$s);
+  if ($s === '') return '';
+  // kalau tidak ada slash sama sekali, anggap file ada di folder uploads/
+  return (strpos($s, '/') === false) ? ('uploads/' . $s) : $s;
+}
+
+$loginUserId = (int)($user['id'] ?? 0);
+$jumlahNotif = 0;
+if ($loginUserId > 0) {
+  $stmtCnt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM notifikasi_targets t
+    LEFT JOIN detail_notifikasi d
+      ON d.notifikasi_id = t.notifikasi_id
+     AND d.user_id       = t.user_id
+    WHERE t.user_id = ?
+      AND (d.read_at IS NULL)        -- belum dibaca
+  ");
+  $stmtCnt->execute([$loginUserId]);
+  $jumlahNotif = (int)$stmtCnt->fetchColumn();
+}
 ?>
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -622,8 +794,46 @@ rsort($opsiTanggal);
   margin-top: 6px;
 }
 
+.export-dropdown { position: relative; display: inline-block; margin-bottom: 10px;}
+.export-toggle { cursor: pointer; }
+
+.export-menu {
+  position: absolute; top: 100%; left: 0;
+  min-width: 210px; padding: 6px;
+  background: #fff; border: 1px solid #ddd; border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.08);
+  z-index: 10; display: none;
+}
+.export-item {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; background: transparent; border: none; cursor: pointer;
+}
+.export-item:hover { background: #f2f6ff; }
+.export-dropdown.open .export-menu { display: block; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -640,12 +850,21 @@ rsort($opsiTanggal);
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
-          <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
+          <i class="bx bxs-user-circle user-icon"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -704,9 +923,14 @@ rsort($opsiTanggal);
 <div class="kontainer-balok">
 
     <!-- Balok 1 -->
-    <div class="balok-1">
-        <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
+    <div class="export-dropdown">
+      <button type="button" class="btn-tambah export-toggle">Export ▾</button>
+      <div class="export-menu">
+        <button type="button" class="export-item" onclick="exportNotifToExcel(false)">Export All</button>
+        <button type="button" class="export-item" onclick="exportNotifToExcel(true)">Export 3 Bulan Terakhir</button>
+      </div>
     </div>
+
 
     <!-- Balok 2: Search Bar -->
     <div class="balok-2">
@@ -757,13 +981,14 @@ rsort($opsiTanggal);
                 <td><?= htmlspecialchars($row['tanggal'] ?? '') ?></td>
                     <td><?= htmlspecialchars($row['no_surat'] ?? '') ?></td>
                     <td>
-                        <?php if (!empty($row['file_url'])): ?>
-                            <a href="<?= htmlspecialchars($row['file_url']) ?>" target="_blank">Lihat File</a>
-                        <?php else: ?>-<?php endif; ?>
+                      <?php $href = url_file($row['file_url'] ?? ''); ?>
+                      <?php if ($href !== ''): ?>
+                        <a href="<?= htmlspecialchars($href) ?>" target="_blank">Lihat File</a>
+                      <?php else: ?>-<?php endif; ?>
                     </td>
                     <td>
                       <?php if (!empty($row['disposisi_kepada'])): ?>
-                        <a class="btn-chat" href="pesan_lihat.php?no_surat=<?= urlencode($row['no_surat']) ?>">💬</a>
+                        <a class="btn-chat" href="pesan_lihat_5.php?no_surat=<?= urlencode($row['no_surat']) ?>">💬</a>
                       <?php else: ?>
                         <button class="btn-chat" disabled title="Isi disposisi dulu">💬</button>
                       <?php endif; ?>
@@ -837,10 +1062,26 @@ rsort($opsiTanggal);
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>
+  <script>
+  const userIcon = document.querySelector(".user-icon");
+  const userMenu = document.getElementById("userMenu");
+  if (userIcon) {
+    userIcon.addEventListener("click", function (e) {
+      e.stopPropagation();
+      userMenu.style.display = userMenu.style.display === "block" ? "none" : "block";
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (userMenu && !userIcon.contains(e.target)) {
+      userMenu.style.display = "none";
+    }
+  });
+  </script>
   <script>
 
 function loadSuratNotif() {
@@ -872,28 +1113,7 @@ function loadSuratNotif() {
     });
 }
 
-(function initUserMenu(){
-  if (window.__userMenuInit) return;           // guard supaya tidak dobel
-  window.__userMenuInit = true;
 
-  const icon = document.querySelector('.user-icon');
-  const menu = document.getElementById('userMenu');
-  if (!icon || !menu) return;
-
-  icon.addEventListener('click', (e) => {
-    e.stopPropagation();
-    menu.style.display = (menu.style.display === 'block' ? 'none' : 'block');
-  });
-  document.addEventListener('click', (e) => {
-    if (!icon.contains(e.target)) menu.style.display = 'none';
-  });
-})();
-
-  document.addEventListener("click", function (e) {
-    if (userMenu && !userIcon.contains(e.target)) {
-      userMenu.style.display = "none";
-    }
-  });
 
 function filterTable(attribute, value) {
   const rows = document.querySelectorAll('.data-row');
@@ -906,66 +1126,104 @@ function filterTable(attribute, value) {
   });
 }
 
-function exportTableToExcel() {
-    var table = document.getElementById("tabelSuratNotif").cloneNode(true);
+// Toggle dropdown Export
+(function initNotifExportDropdown(){
+  const dd  = document.querySelector('.export-dropdown');
+  const btn = dd?.querySelector('.export-toggle');
+  if (!btn) return;
 
-    // Hapus elemen no-export
-    var filters = table.querySelectorAll(".no-export");
-    filters.forEach(filter => filter.remove());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dd.classList.toggle('open');
+  });
+  document.addEventListener('click', () => dd.classList.remove('open'));
+})();
 
-    var headers = table.querySelectorAll("th");
-    var removeIndexes = [];
 
-    // Cari index kolom yang mau dihapus
-    headers.forEach((cell, index) => {
-        var text = cell.childNodes[0].textContent.trim();
-        if (text === "Aksi" || text === "File") {
-            removeIndexes.push(index);
-        }
-    });
+window.exportNotifToExcel = function (last3Months) {
+  if (typeof XLSX === 'undefined') { 
+    alert('Library XLSX belum ter-load.'); 
+    return; 
+  }
 
-    // Ambil header
-    var headerCells = table.querySelectorAll('tr')[0].querySelectorAll('th');
-    var headersArray = [];
+  const src = document.getElementById('tabelSuratNotif');
+  if (!src) { alert('Tabel tidak ditemukan'); return; }
 
-    headerCells.forEach((cell, index) => {
-        if (!removeIndexes.includes(index)) {
-            headersArray.push(cell.childNodes[0].textContent.trim());
-        }
-    });
+  // Clone agar aman dimodifikasi
+  const table = src.cloneNode(true);
 
-    // Ambil data isi
-    var bodyRows = table.querySelectorAll('tr');
-    var dataArray = [];
+  // 1) Hilangkan elemen interaktif dari salinan (header filter/select/button)
+  table.querySelectorAll('.no-export, select, form, button').forEach(el => el.remove());
 
-    for (var i = 1; i < bodyRows.length; i++) {
-        var row = bodyRows[i];
-        var rowData = [];
-        var cells = row.querySelectorAll('td');
-        cells.forEach((cell, index) => {
-            if (!removeIndexes.includes(index)) {
-                rowData.push(cell.textContent.trim());
-            }
-        });
-        if (rowData.length > 0) {
-            dataArray.push(rowData);
-        }
+  // 2) Pertahankan hanya baris yang SEDANG TAMPIL (mengikuti filter/search user)
+  const origRows  = Array.from(src.querySelectorAll('tbody tr.data-row'));
+  const cloneRows = Array.from(table.querySelectorAll('tbody tr.data-row'));
+  cloneRows.forEach((tr, i) => {
+    // kalau baris aslinya sudah tidak ada (harusnya tidak sih), aman-kan:
+    const ref = origRows[i];
+    if (!ref) return;
+    const hidden = window.getComputedStyle(ref).display === 'none';
+    if (hidden) tr.remove();
+  });
+
+  // 3) Opsi filter 3 bulan terakhir berdasarkan atribut data-tanggal
+  function parseFlexibleDate(str){
+    if (!str) return null;
+    str = String(str).trim();
+    if (str.length >= 10) str = str.slice(0,10); // potong waktu jika ada
+
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [y,m,d] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;   // <-- perbaikan penting
     }
+    // DD-MM-YYYY
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+      const [d,m,y] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;   // <-- perbaikan penting
+    }
+    return null;
+  }
 
-    var exportData = [headersArray, ...dataArray];
+  if (last3Months) {
+    const today = new Date();
+    const start = new Date(today.getTime() - 90*24*60*60*1000);
+    const end   = today;
 
-    var ws = XLSX.utils.aoa_to_sheet(exportData);
-    ws['!cols'] = [
-        { wch: 15 }, 
-        { wch: 15 }, 
-        { wch: 15 }, 
-    ];
+    table.querySelectorAll('tbody tr.data-row').forEach(tr => {
+      const raw = tr.getAttribute('data-tanggal') || '';
+      const dt  = parseFlexibleDate(raw);
+      if (!dt || dt < start || dt > end) tr.remove();
+    });
+  }
 
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "surat notif");
-    XLSX.writeFile(wb, "surat_notif.xlsx");
-    alert("Data berhasil diekspor!");
-}
+  // 4) Hapus kolom yang tidak perlu: File, Chat, Aksi
+  const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+  const ths = Array.from(headerRow.children);
+  const removeIdx = ths
+    .map((th, i) => [ (th.textContent||'').trim().split('\n')[0], i ])
+    .filter(([t]) => ['File','Chat','Aksi'].includes(t))
+    .map(([, i]) => i);
+
+  table.querySelectorAll('tr').forEach(tr => {
+    Array.from(tr.children).forEach((td, i) => { if (removeIdx.includes(i)) td.remove(); });
+  });
+
+  // 5) Buat workbook dari tabel
+  const wb = XLSX.utils.table_to_book(table, { sheet: 'Notif Surat' });
+  const ws = wb.Sheets['Notif Surat'];
+
+  // Lebar kolom berdasar header
+  const firstRow = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] || [];
+  ws['!cols'] = firstRow.map(h => ({ wch: Math.min(Math.max(String(h||'').length + 2, 12), 40) }));
+
+  XLSX.writeFile(wb, `surat_notif_${last3Months ? '3bulan' : 'all'}.xlsx`);
+
+  // tutup dropdown setelah export
+  document.querySelector('.export-dropdown')?.classList.remove('open');
+};
 
 function resetFilters() {
   const selects = document.querySelectorAll('select');
@@ -1011,7 +1269,7 @@ function searchTable() {
 }
 
 function loadChat(noSurat, container) {
-  const url = 'pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat);
+  const url = 'pesan_lihat_5.php?ajax=1&no_surat=' + encodeURIComponent(noSurat);
   container.innerHTML = '<div style="opacity:.6">Memuat percakapan...</div>';
 
   fetch(url, {
@@ -1088,7 +1346,7 @@ setInterval(function () {
     const noSurat = chatRow.dataset.noSurat;
     const chatBoxDiv = chatRow.querySelector('.chat-box');
     if (noSurat && chatBoxDiv) {
-      fetch('pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat))
+      fetch('pesan_lihat_5.php?ajax=1&no_surat=' + encodeURIComponent(noSurat))
       .then(r => r.text())
       .then(html => {
         chatBoxDiv.innerHTML = html && html.trim()
@@ -1101,7 +1359,7 @@ setInterval(function () {
   });
 }, 10000);
 
-// Edit pesan (opsional, panggil dari HTML di pesan_lihat.php)
+// Edit pesan (opsional, panggil dari HTML di pesan_lihat_5.php)
 function editPesan(idPesan, isiLama) {
   const pesanBaru = prompt("Edit pesan:", isiLama);
   if (pesanBaru && pesanBaru !== isiLama) {
@@ -1185,6 +1443,19 @@ function applyNotifFilters(){
 document.addEventListener('DOMContentLoaded', () => {
   showNotifReset();
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(location.search);
+  const no = (params.get('no_surat') || '').toLowerCase();
+  if (!no) return;
+  document.querySelectorAll('[data-no_surat]').forEach(tr => {
+    if ((tr.getAttribute('data-no_surat')||'').toLowerCase() === no) {
+      tr.style.outline = '2px solid #28a745';
+      tr.scrollIntoView({behavior:'smooth', block:'center'});
+    }
+  });
+});
+
   </script>
 </body>
 </html>    

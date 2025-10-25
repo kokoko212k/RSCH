@@ -106,20 +106,18 @@ session_start();
     <h2>Login</h2>
     <p>Gunakan akun anda untuk masuk</p>
 
-    <form class="login-form" method="POST" action="login2.php">
-    <?php
-    if (isset($_SESSION['message'])):
-      $color = strpos($_SESSION['message'], 'gagal') !== false ? 'red' : 'green';
-    ?>
-      <p style="color: <?= $color ?>;"><?= $_SESSION['message'] ?></p>
-    <?php
-      unset($_SESSION['message']);
-    endif;
-    ?>
-        <input type="text" name="nik" placeholder="NIK" required />
-        <input type="password" name="password" placeholder="Password" required />
-        <button type="submit" class="login-btn">Login</button>
-      </form>
+    <form class="login-form" method="POST" action="login2.php" autocomplete="off">
+      <!-- “umpan” tersembunyi untuk menangkap autofill -->
+      <input type="text" name="fake-username" autocomplete="username" style="position:absolute; left:-9999px; height:0; opacity:0;">
+      <input type="password" name="fake-password" autocomplete="new-password" style="position:absolute; left:-9999px; height:0; opacity:0;">
+
+      <!-- field asli --> 
+      <input type="text" name="nik" placeholder="NIK"
+            autocomplete="off" inputmode="numeric">
+      <input type="password" name="password" placeholder="Password"
+            autocomplete="new-password">
+      <button type="submit" class="login-btn">Login</button>
+    </form>
     </div>
   </div>
 
@@ -148,7 +146,7 @@ session_start();
       </div>
     </div>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>

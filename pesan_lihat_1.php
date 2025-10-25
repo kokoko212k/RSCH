@@ -8,20 +8,22 @@ if (!isset($_SESSION['user'])) {
     exit;
 }
 
-// ambil konteks user
-$user        = $_SESSION['user'];
-$user_nama   = $user['nama']   ?? '';
-$user_status = $user['status'] ?? '';
+// ===================== Ambil konteks user =====================
+$user         = $_SESSION['user'];
+$user_nik     = $user['nik']    ?? null;          // pakai NIK
+$user_nama    = $user['nama']   ?? '';
+$user_status  = $user['status'] ?? '';
+$user_unit    = trim((string)($user['unit'] ?? ''));
 
 // dipakai navbar
 $role = $user_status;
-$can_access_eoffice = in_array($role, ['Super Admin']);
+$can_access_eoffice = in_array($role, ['Super Admin', 'Direktur', 'Sekretariat', 'Admin', 'Member']);
 
-// dipakai chat
-$pengirim = $user_nama;
-$penerima = ($user_status === 'Super Admin') ? 'Sekretariat' : 'Super Admin';
+// role yang boleh lihat lintas unit untuk semua thread
+$roles_full_access = ['Super Admin', 'Direktur', 'Sekretariat', 'Admin', 'Member'];
+$by_role_full      = in_array($user_status, $roles_full_access, true) ? 1 : 0;
 
-// ambil parameter surat
+// ===================== Ambil parameter surat =====================
 $no_surat = $_GET['no_surat'] ?? ($_GET['id'] ?? null);
 
 // deteksi AJAX
@@ -33,18 +35,23 @@ if ($pdo->getAttribute(PDO::ATTR_ERRMODE) !== PDO::ERRMODE_EXCEPTION) {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 }
 
-
-// --- POST: hapus pesan (opsional dipakai kalau form delete submit ke file ini)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_pesan_id'])) {
     $hapusId      = (int) ($_POST['hapus_pesan_id'] ?? 0);
     $hapusNoSurat = $_POST['no_surat'] ?? '';
 
-    // cek kepemilikan pesan
-    $stmtCheck = $pdo->prepare("SELECT pengirim FROM pesan WHERE id = ?");
+    $stmtCheck = $pdo->prepare("SELECT pengirim_nik, pengirim_unit FROM pesan WHERE id = ?");
     $stmtCheck->execute([$hapusId]);
-    $pengirimPesan = $stmtCheck->fetchColumn();
+    $own = $stmtCheck->fetch(PDO::FETCH_ASSOC);
 
-    if ($pengirimPesan === $user_status || $pengirimPesan === $user_nama) {
+    $bolehHapus = false;
+    if (!empty($own['pengirim_nik']) && !empty($user_nik)) {
+        $bolehHapus = ($own['pengirim_nik'] === $user_nik);
+    } else {
+        // fallback bandingkan unit jika pengirim_nik kosong
+        $bolehHapus = (trim((string)$own['pengirim_unit']) === $user_unit);
+    }
+
+    if ($bolehHapus) {
         $stmtDelete = $pdo->prepare("DELETE FROM pesan WHERE id = ?");
         $stmtDelete->execute([$hapusId]);
 
@@ -68,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_pesan_id'])) {
     }
 }
 
-// --- notifikasi GET hanya jika non-AJAX
+// ===================== Notifikasi GET (non-AJAX) =====================
 if (!$isAjax && isset($_GET['status'])) {
     if ($_GET['status'] === 'success') {
         echo "<div class='notif success'>Pesan berhasil dikirim.</div>";
@@ -80,35 +87,102 @@ if (!$isAjax && isset($_GET['status'])) {
     }
 }
 
-// --- wajib punya no_surat
+// ===================== Wajib punya no_surat =====================
 if (!$no_surat) {
     echo $isAjax ? '' : "<div class='notif error'>Nomor surat tidak ditemukan.</div>";
     exit;
 }
 
-// --- ambil pesan
-$stmt = $pdo->prepare("SELECT * FROM pesan WHERE no_surat = ? ORDER BY waktu ASC");
-$stmt->execute([$no_surat]);
+
+$chk = $pdo->prepare("
+  SELECT 1
+  FROM pesan
+  WHERE no_surat = :no_surat
+    AND (
+         pengirim_nik = :me_nik
+      OR penerima_nik = :me_nik
+      OR UPPER(TRIM(pengirim_unit)) = UPPER(TRIM(:me_unit))
+      OR UPPER(TRIM(penerima_unit)) = UPPER(TRIM(:me_unit))
+    )
+  LIMIT 1
+");
+$chk->execute([
+  ':no_surat' => $no_surat,
+  ':me_nik'   => $user_nik,
+  ':me_unit'  => $user_unit,
+]);
+if ($chk->fetchColumn()) {
+    $by_participation_full = 1;
+}
+
+$has_full_access = ($by_role_full || $by_participation_full) ? 1 : 0;
+
+// ===================== Ambil pesan (per no_surat) =====================
+// Jika $has_full_access = 1 -> lihat semua pesan di thread (lintas unit)
+// Jika tidak -> dibatasi yg menyentuh NIK/UNIT user
+$stmt = $pdo->prepare("
+  SELECT *
+  FROM pesan
+  WHERE no_surat = :no_surat
+    AND (
+         :full = 1
+      OR pengirim_nik = :me_nik
+      OR penerima_nik = :me_nik
+      OR UPPER(TRIM(pengirim_unit)) = UPPER(TRIM(:me_unit))
+      OR UPPER(TRIM(penerima_unit)) = UPPER(TRIM(:me_unit))
+    )
+  ORDER BY waktu ASC
+");
+$stmt->execute([
+  ':no_surat' => $no_surat,
+  ':me_nik'   => $user_nik,
+  ':me_unit'  => $user_unit,
+  ':full'     => $has_full_access,
+]);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// --- JIKA AJAX: hanya render bubble chat & keluar
+// ===================== Prefill info disposisi_kepada (opsional) =====================
+$pref_status = null;
+try {
+    $qPref = $pdo->prepare("SELECT dari FROM surat_pengajuan WHERE no_surat = ? ORDER BY id DESC LIMIT 1");
+    $qPref->execute([$no_surat]);
+    $pref_status = trim((string)$qPref->fetchColumn()) ?: null;
+} catch (Throwable $e) {
+    $pref_status = null;
+}
+
+// ===================== JIKA AJAX: render bubble chat & keluar =====================
 if ($isAjax) {
     if (!$rows) {
         echo '<div class="notif">Belum ada pesan untuk surat ini.</div>';
         exit;
     }
 
+    $printed = [];
     foreach ($rows as $row) {
-        $isSender    = ($row['pengirim'] === $user_status || $row['pengirim'] === $user_nama);
+    // kunci dedupe: pengirim + isi + detik waktunya
+    $key = ($row['pengirim_nik'] ?? '').'|'.trim((string)($row['pesan'] ?? '')).'|'.substr((string)($row['waktu'] ?? ''), 0, 19);
+
+    // SELALU dedupe, tak peduli viewer pengirim atau bukan
+    if (isset($printed[$key])) continue;
+    $printed[$key] = true;
+
+    $isSender = (!empty($row['pengirim_nik']) && $row['pengirim_nik'] === $user_nik);
+
+
         $bubbleClass = $isSender ? 'chat-bubble right' : 'chat-bubble left';
-        $label       = $isSender ? 'Anda' : htmlspecialchars($row['pengirim'] ?? '', ENT_QUOTES, 'UTF-8');
-        $pesanTxt    = trim($row['pesan'] ?? '');
-        $pesanSafe   = $pesanTxt !== '' ? nl2br(htmlspecialchars($pesanTxt, ENT_QUOTES, 'UTF-8')) : '<i>(Tidak ada isi pesan)</i>';
-        $waktu       = date('d M Y H:i', strtotime($row['waktu'] ?? 'now'));
+
+        // label pengirim: pakai pengirim_nama (baru), fallback ke pengirim_unit (lama)
+        $labelSrc = $row['pengirim_nama'] ?? $row['pengirim_unit'] ?? '';
+        $label    = $isSender ? 'Anda' : htmlspecialchars((string)$labelSrc, ENT_QUOTES, 'UTF-8');
+
+        $pesanTxt  = trim((string)($row['pesan'] ?? ''));
+        $pesanSafe = $pesanTxt !== '' ? nl2br(htmlspecialchars($pesanTxt, ENT_QUOTES, 'UTF-8')) : '<i>(Tidak ada isi pesan)</i>';
+        $waktu     = date('d M Y H:i', strtotime($row['waktu'] ?? 'now'));
         ?>
         <div class="<?= $bubbleClass ?>">
             <strong><?= $label ?></strong><br>
-            <div class="chat-text"><b>Pesan:</b> <?= $pesanSafe ?></div>
+            <div class="chat-text"><?= $pesanSafe ?></div>
             <div class="chat-time"><?= $waktu ?></div>
 
             <?php if ($isSender): ?>
@@ -117,19 +191,15 @@ if ($isAjax) {
                 <input type="hidden" name="no_surat" value="<?= htmlspecialchars($no_surat, ENT_QUOTES, 'UTF-8') ?>">
                 <button type="submit" style="background:none;border:none;color:red;cursor:pointer;">🗑️</button>
               </form>
-              <button
-                onclick="editPesan(<?= (int)$row['id'] ?>, '<?= htmlspecialchars($row['pesan'] ?? '', ENT_QUOTES, 'UTF-8') ?>')"
-                style="background:none;border:none;color:blue;cursor:pointer;">
-                ✏️
-              </button>
+              <!-- tombol edit opsional -->
+              <!-- <button onclick="editPesan(<?= (int)$row['id'] ?>, '<?= htmlspecialchars((string)($row['pesan'] ?? ''), ENT_QUOTES, 'UTF-8') ?>')" style="background:none;border:none;color:blue;cursor:pointer;">✏️</button> -->
             <?php endif; ?>
         </div>
         <?php
     }
-    exit; 
+    exit;
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -373,7 +443,41 @@ if ($isAjax) {
     margin-top: 5px;
     text-align: right;
 }
+.send {
+  width: 70%;         
+  margin-left: 0;
+  height: 60px;       
+  margin-right: auto;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  /* border-top: 1px solid #ddd; */
+}
 
+.send textarea {
+    flex: 1;
+    height: 60px;
+    resize: none;
+    padding: 8px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+}
+
+.send button {
+    background-color: #007bff;
+    color: #fff;
+    height: 60px;
+    /* width: 40px; */
+    border: none;
+    border-radius: 8px;
+    padding: 10px 15px;
+    cursor: pointer;
+}
+
+.send button:hover {
+    background-color: #0056b3;
+}
 </style>
 <body>
   <!-- Latar Belakang -->
@@ -398,6 +502,9 @@ if ($isAjax) {
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+                <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -426,7 +533,7 @@ if ($isAjax) {
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="bacaan.php" class="fitur-nav">Bacaan</a></li>
         <?php endif; ?>
-        <li><a href="masukan.php" class="fitur-nav">Masukan</a></li>
+        <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
         <li class="dropdown">
           <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
@@ -454,44 +561,43 @@ if ($isAjax) {
     </div>
   </nav>
 
-<!-- Judul di luar kontainer -->
-<h2 class="judul-surat-luar">Disposisi Tindak Lanjut</h2>
+    <!-- <div class="balok-1">
+      <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
+    </div> -->
 
-<!-- Buka kontainer utama -->
-<div class="kontainer-balok">
+    <!-- <div class="balok-2">
+      <div class="search-bar">
+        <input type="text" placeholder="..." id="searchInput" oninput="searchTable()" />
+        <button>Cari</button>
+      </div>
+    </div> -->
 
-    <!-- Balok 1 -->
-    <div class="balok-1">
-        <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
-    </div>
+  <h2 class="judul-surat-luar">Pesan</h2>
 
-    <!-- Balok 2: Search Bar -->
-    <div class="balok-2">
-        <div class="search-bar">
-            <input type="text" placeholder="..." id="searchInput" oninput="searchTable()" />
-            <button>Cari</button>
-        </div>
-    </div>
+  <div class="kontainer-balok">
+    <div class="wrap">
+      <div class="head">
+        <a id="btnBack" role="button" tabindex="0">← Kembali</a>
+        <h2 style="margin:0">Chat: <?= htmlspecialchars($no_surat, ENT_QUOTES) ?></h2>
+      </div>
 
-  <div class="wrap">
-    <div class="head">
-      <a href="surat_disposisi_tindak_lanjut.php">← Kembali</a>
-      <h2 style="margin:0">Chat: <?= htmlspecialchars($no_surat, ENT_QUOTES) ?></h2>
-    </div>
+      <!-- <?php if ($pref_status): ?>
+        <div class="notif info">Pesan akan dikirim ke semua user berstatus: <b><?= htmlspecialchars($pref_status) ?></b></div>
+      <?php endif; ?> -->
 
-    <div class="card">
-      <div id="chatBox" class="chat-box"><div style="opacity:.6">Memuat...</div></div>
+      <div class="card">
+        <div id="chatBox" class="chat-box"><div style="opacity:.6">Memuat...</div></div>
 
-      <form id="formSend" class="send" method="post">
-        <input type="hidden" name="no_surat" value="<?= htmlspecialchars($no_surat, ENT_QUOTES) ?>">
-        <input type="hidden" name="pengirim" value="<?= htmlspecialchars($pengirim, ENT_QUOTES) ?>">
-        <input type="hidden" name="penerima" value="<?= htmlspecialchars($penerima, ENT_QUOTES) ?>">
-        <textarea name="pesan" placeholder="Ketik pesan..." required></textarea>
-        <button type="submit">Kirim</button>
-      </form>
+        <form id="formSend" class="send" method="post" action="pesan_buat_1.php">
+          <input type="hidden" name="no_surat" value="<?= htmlspecialchars($no_surat, ENT_QUOTES) ?>">
+          <textarea name="pesan" placeholder="Ketik pesan..." required></textarea>
+          <button type="submit">Kirim</button>
+        </form>
+      </div>
     </div>
   </div>
-</div>
+
+
 
   <!-- Footer -->
   <footer>
@@ -527,53 +633,98 @@ if ($isAjax) {
         Jawa Timur, Indonesia 68117</p>
       </div>
     </div>
-  </footer>
+    </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
-  <script src="script.js"></script>
+  <script>
+  const userIcon = document.querySelector(".user-icon");
+  const userMenu = document.getElementById("userMenu");
+  if (userIcon) {
+    userIcon.addEventListener("click", function (e) {
+      e.stopPropagation();
+      userMenu.style.display = userMenu.style.display === "block" ? "none" : "block";
+    });
+  }
 
-<script>
-const noSurat  = <?= json_encode($no_surat) ?>;
-const chatBox  = document.getElementById('chatBox');
-const formSend = document.getElementById('formSend');
+  document.addEventListener("click", function (e) {
+    if (userMenu && !userIcon.contains(e.target)) {
+      userMenu.style.display = "none";
+    }
+  });
 
-function loadChat() {
-  chatBox.innerHTML = '<div style="opacity:.6">Memuat...</div>';
-  fetch('pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat), {
-    headers: {'X-Requested-With': 'XMLHttpRequest'},
-    credentials: 'same-origin'
-  })
-  .then(r => r.text())
-  .then(html => {
-    chatBox.innerHTML = (html && html.trim())
-      ? '<div class="chat-container">' + html + '</div>'
-      : '<div style="opacity:.6">Belum ada pesan.</div>';
-    chatBox.scrollTop = chatBox.scrollHeight;
-  })
-  .catch(err => chatBox.innerHTML = '<div style="color:#b00020">Gagal memuat: ' + err.message + '</div>');
-}
+  </script>
+  <script>
+  const noSurat  = <?= json_encode($no_surat) ?>;
+  const chatBox  = document.getElementById('chatBox');
+  const formSend = document.getElementById('formSend');
 
-formSend.addEventListener('submit', e => {
-  e.preventDefault();
-  const fd = new FormData(formSend);
-  const btn = formSend.querySelector('button');
-  btn.disabled = true;
-
-  fetch('pesan_buat.php', { method:'POST', body:fd, credentials:'same-origin' })
+  function loadChat() {
+    chatBox.innerHTML = '<div style="opacity:.6">Memuat...</div>';
+    fetch('pesan_lihat_1.php?ajax=1&no_surat=' + encodeURIComponent(noSurat), {
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+      credentials: 'same-origin'
+    })
     .then(r => r.text())
-    .then(() => { formSend.pesan.value=''; loadChat(); })
-    .finally(() => { btn.disabled = false; });
-});
+    .then(html => {
+      chatBox.innerHTML = (html && html.trim())
+        ? '<div class="chat-container">' + html + '</div>'
+        : '<div style="opacity:.6">Belum ada pesan.</div>';
+      chatBox.scrollTop = chatBox.scrollHeight;
+    })
+    .catch(err => chatBox.innerHTML = '<div style="color:#b00020">Gagal memuat: ' + err.message + '</div>');
+  }
 
-// refresh berkala
-setInterval(() => {
+  formSend.addEventListener('submit', e => {
+    e.preventDefault();
+    const fd = new FormData(formSend);
+    const btn = formSend.querySelector('button');
+    btn.disabled = true;
+
+    fetch(formSend.action, { method:'POST', body:fd, credentials:'same-origin' })
+      .then(r => r.text())
+      .then(() => { formSend.pesan.value=''; loadChat(); })
+      .finally(() => { btn.disabled = false; });
+  });
+
+  setInterval(loadChat, 10000);
   loadChat();
-}, 10000);
 
-loadChat();
+//   function updateToVisibility() {
+//     const type = document.querySelector('input[name="to_type"]:checked')?.value || 'status';
+//     const elStatus = document.getElementById('toStatus');
+//     const elNama   = document.getElementById('toNama');
+//     if (type === 'status') {
+//       elStatus.style.display = '';
+//       elNama.style.display   = 'none';
+//     } else {
+//       elStatus.style.display = 'none';
+//       elNama.style.display   = '';
+//     }
+//   }
+//   document.querySelectorAll('input[name="to_type"]').forEach(r => {
+//     r.addEventListener('change', updateToVisibility);
+//   });
+//   // Prefill: jika ada $pref_status, default tetap "status"
+//   updateToVisibility();
+
+
+  </script>
+<script>
+  const el = document.getElementById('btnBack');
+
+  // Klik mouse
+  el.addEventListener('click', () => history.back());
+
+  // Keyboard: Enter / Space
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      history.back();
+    }
+  });
 </script>
 </body>
 </html>

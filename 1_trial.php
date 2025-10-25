@@ -1,6 +1,7 @@
 <?php
 session_start();
-include 'config.php';
+require_once __DIR__ . '/config.php';
+
 
 $user = $_SESSION['user'] ?? null;
 $user_id = $user['user']['id'] ?? null;
@@ -84,6 +85,7 @@ $rolePages = [
 // Tentukan halaman yang boleh tampil untuk role saat ini
 $allowedEofficePages = $rolePages[$role] ?? [];
 $can_access_eoffice  = !empty($allowedEofficePages);
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
 
 
@@ -137,17 +139,37 @@ $can_access_eoffice  = !empty($allowedEofficePages);
 
 .grafik-box{
   position: relative;
-  height: 100px;  /* pilih tinggi tetap */
+  height:  800px;  /* pilih tinggi tetap */
 }
 canvas{
   display: block;            /* penting: hindari baseline-jerk */
   width: 100% !important;
   height: 100% !important;   /* jangan pakai height:auto */
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
 
-
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -164,13 +186,21 @@ canvas{
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
-            <a href="users.php">Data User</a>            
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>                        
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -385,16 +415,98 @@ canvas{
     </iframe>
   </div>
 </section> -->
+<?php
+function disableAutoplayEmbed(string $url): string {
+  $url = trim($url);
+  if ($url === '') return $url;
+
+  $parts = parse_url($url);
+  $host  = strtolower($parts['host'] ?? '');
+
+  // Helper tambah/replace query param
+  $addParam = function(string $u, array $params) {
+    $p = parse_url($u);
+    $q = [];
+    if (!empty($p['query'])) parse_str($p['query'], $q);
+    $q = array_merge($q, $params);
+    $p['query'] = http_build_query($q);
+    // rakit ulang
+    $scheme = $p['scheme'] ?? 'https';
+    $host   = $p['host'] ?? '';
+    $path   = $p['path'] ?? '';
+    $query  = $p['query'] ? '?'.$p['query'] : '';
+    $frag   = isset($p['fragment']) ? '#'.$p['fragment'] : '';
+    return "$scheme://$host$path$query$frag";
+  };
+
+  // YouTube
+  if (strpos($host, 'youtube.com') !== false || strpos($host, 'youtu.be') !== false) {
+    // Normalisasi ke /embed/VIDEO_ID
+    $videoId = null;
+    if (strpos($host, 'youtu.be') !== false) {
+      $videoId = ltrim($parts['path'] ?? '', '/');
+    } else {
+      // youtube.com/watch?v=ID
+      parse_str($parts['query'] ?? '', $q);
+      if (!empty($q['v'])) $videoId = $q['v'];
+      // youtube.com/embed/ID sudah ok
+      if (strpos($parts['path'] ?? '', '/embed/') !== false) {
+        $embed = $url;
+        return $addParam($embed, ['autoplay'=>0, 'mute'=>0, 'rel'=>0, 'modestbranding'=>1, 'playsinline'=>1]);
+      }
+    }
+    if ($videoId) {
+      $embed = "https://www.youtube.com/embed/{$videoId}";
+      return $addParam($embed, ['autoplay'=>0, 'mute'=>0, 'rel'=>0, 'modestbranding'=>1, 'playsinline'=>1]);
+    }
+    // fallback: matikan autoplay kalau ada
+    return $addParam($url, ['autoplay'=>0, 'mute'=>0]);
+  }
+
+  // Vimeo
+  if (strpos($host, 'vimeo.com') !== false) {
+    // vimeo.com/123 → player.vimeo.com/video/123
+    if (preg_match('~vimeo\.com/(\d+)~', $url, $m)) {
+      $embed = "https://player.vimeo.com/video/{$m[1]}";
+      return $addParam($embed, ['autoplay'=>0, 'muted'=>0]);
+    }
+    return $addParam($url, ['autoplay'=>0, 'muted'=>0]);
+  }
+
+  // Google Drive preview
+  if (strpos($host, 'drive.google.com') !== false && strpos($url, '/preview') !== false) {
+    return $addParam($url, ['autoplay'=>0]);
+  }
+
+  // Default: kembalikan apa adanya (tanpa memaksa autoplay)
+  return $url;
+}
+
+// Deteksi file video langsung (mp4/webm/ogg)
+$videoRaw = $video['file_url'] ?? '';
+$path = parse_url($videoRaw, PHP_URL_PATH) ?? '';
+$isDirectVideo = preg_match('~\.(mp4|webm|ogg)$~i', $path);
+
+$embedUrl = disableAutoplayEmbed($videoRaw);
+?>
 <section class="video">
   <div class="video-wrapper">
-    <?php if ($video): ?>
-      <iframe 
-        width="560" 
-        height="315" 
-        src="<?= htmlspecialchars($video['file_url']) ?>" 
-        frameborder="0" 
-        allowfullscreen>
-      </iframe>
+    <?php if ($video && $videoRaw): ?>
+      <?php if ($isDirectVideo): ?>
+        <video width="560" height="315" controls preload="metadata" playsinline>
+          <source src="<?= htmlspecialchars($videoRaw) ?>" type="video/mp4">
+          Browser Anda tidak mendukung pemutar video.
+        </video>
+      <?php else: ?>
+        <iframe
+          width="560"
+          height="315"
+          src="<?= htmlspecialchars($embedUrl) ?>"
+          loading="lazy"
+          frameborder="0"
+          allowfullscreen>
+        </iframe>
+      <?php endif; ?>
     <?php else: ?>
       <p>Tidak ada video.</p>
     <?php endif; ?>
@@ -478,7 +590,7 @@ canvas{
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>

@@ -56,47 +56,74 @@ $penulis            = $_POST['penulis'] ?? '';
 $tahun            = $_POST['tahun'] ?? '';
 $deskripsi          = $_POST['deskripsi'] ?? '';
 
-$upload_dir = 'repositori/files/';
-$image_url = '';
-$file_url = '';
+// ====== SETUP FOLDER ======
+$files_public  = 'repository/files/';    // untuk disimpan di DB / <a href> / <embed>
+$images_public = 'repository/images/';
+
+$files_fs  = __DIR__ . '/' . $files_public;   // path FISIK (absolut)
+$images_fs = __DIR__ . '/' . $images_public;
+
+// buat folder kalau belum ada
+foreach ([$files_fs, $images_fs] as $dir) {
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+    if (!is_writable($dir)) {
+        die('Folder tidak writable: ' . $dir);
+    }
+}
+
+// helper nama file aman + unik
+function make_safe_name(string $original, string $forcedExt = ''): string {
+    $base = pathinfo($original, PATHINFO_FILENAME);
+    $ext  = $forcedExt !== '' ? $forcedExt : pathinfo($original, PATHINFO_EXTENSION);
+    $base = preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $base);
+    return date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '_' . $base . '.' . strtolower($ext);
+}
+
 
 if (isset($_FILES['gambar']) && $_FILES['gambar']['error'] === UPLOAD_ERR_OK) {
-    $file_tmp = $_FILES['gambar']['tmp_name'];
-    $file_name = basename($_FILES['gambar']['name']);
-    $target_file = $upload_dir . time() . '_' . $file_name;
+    $tmp = $_FILES['gambar']['tmp_name'];
+    $ext = strtolower(pathinfo($_FILES['gambar']['name'], PATHINFO_EXTENSION));
+    $allowed_img = ['jpg','jpeg','png','webp'];
+    if (!in_array($ext, $allowed_img, true)) {
+        echo "<script>alert('Gambar harus jpg/jpeg/png/webp'); history.back();</script>"; exit;
+    }
 
-    if (move_uploaded_file($file_tmp, $target_file)) {
-        $image_url = $target_file; 
-    } else {
-        echo "<script>alert('Gagal mengunggah gambar.'); window.history.back();</script>";
-        exit;
+    $imgName   = make_safe_name($_FILES['gambar']['name']); // pertahankan ekstensi asli
+    $target_fs = $images_fs . $imgName;      // untuk move_uploaded_file
+    $image_url = $images_public . $imgName;  // simpan ini ke DB
+
+    if (!move_uploaded_file($tmp, $target_fs)) {
+        echo "<script>alert('Gagal mengunggah gambar.'); history.back();</script>"; exit;
     }
 } else {
-    echo "<script>alert('Gambar tidak ditemukan atau terjadi kesalahan upload.'); window.history.back();</script>";
-    exit;
+    echo "<script>alert('Gambar tidak ditemukan / error upload.'); history.back();</script>"; exit;
 }
+
 
 if (isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
-    $file_tmp = $_FILES['file']['tmp_name'];
-    $file_name = basename($_FILES['file']['name']);
-    $target_file = $upload_dir . time() . '_' . $file_name;
+    $tmp = $_FILES['file']['tmp_name'];
 
-    $allowed_types = ['application/pdf'];
-    if (!in_array($_FILES['file']['type'], $allowed_types)) {
-        echo "<script>alert('Tipe file tidak diizinkan. Hanya PDF yang diperbolehkan.'); window.history.back();</script>";
-        exit;
+    // Validasi MIME pakai finfo (lebih aman)
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime  = $finfo->file($tmp);
+    if ($mime !== 'application/pdf') {
+        echo "<script>alert('File harus PDF.'); history.back();</script>"; exit;
     }
 
-    if (move_uploaded_file($file_tmp, $target_file)) {
-        $file_url = $target_file; 
-    } else {
-        echo "<script>alert('Gagal mengunggah file.'); window.history.back();</script>";
-        exit;
+    $pdfName   = make_safe_name($_FILES['file']['name'], 'pdf'); // paksa .pdf
+    $target_fs = $files_fs . $pdfName;
+    $file_url  = $files_public . $pdfName;   // simpan ini ke DB
+
+    if (!move_uploaded_file($tmp, $target_fs)) {
+        echo "<script>alert('Gagal mengunggah file PDF.'); history.back();</script>"; exit;
     }
 } else {
-    echo "<script>alert('File tidak ditemukan atau terjadi kesalahan upload.'); window.history.back();</script>";
-    exit;
+    echo "<script>alert('File PDF tidak ditemukan / error upload.'); history.back();</script>"; exit;
 }
+
+
 
 // Validasi kosong
 if (
@@ -109,7 +136,7 @@ if (
 
 // Validasi format tanggal
 if (!preg_match('/^\d{4}$/', $tahun)) {
-    echo "<script>alert('Format tahun tidak valid. Gunakan format YYYY.'); window.history.back();</script>";
+    echo "<script>alert('Format tahun tidak valid.'); window.history.back();</script>";
     exit;
 }
 
@@ -147,6 +174,7 @@ try {
   echo "Terjadi kesalahan: " . $e->getMessage();
 }
 }
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
 
 
@@ -299,8 +327,30 @@ try {
 .user-menu a:hover {
   background-color: #f0f0f0;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -317,12 +367,21 @@ try {
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -392,11 +451,11 @@ try {
         </div>
         <div class="input-row">
           <label for="gambar">Gambar Thumbnail</label>
-          <input type="file" id="gambar" name="gambar" accept="image/*" />
+          <input type="file" id="gambar" name="gambar" accept="image/*" required />
         </div>
         <div class="input-row">
           <label for="file">File Repositori</label>
-          <input type="file" id="file" name="file" accept="application/pdf" />
+          <input type="file" id="file" name="file" accept="application/pdf" required />
         </div>                 
         <div class="form-actions">
           <button type="submit" class="button-row">Simpan</button>
@@ -438,7 +497,7 @@ try {
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
 

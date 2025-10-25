@@ -69,6 +69,17 @@ mysqli_stmt_bind_param($stmt, "i", $id);
 mysqli_stmt_execute($stmt);
 $result = mysqli_stmt_get_result($stmt);
 $data = mysqli_fetch_assoc($result);
+$masterDitujukanKepada = [
+  'GUDANG FARMASI','GUDANG LOGISTIK','GUDANG FIX ASET','FARMASI RAWAT JALAN','FARMASI RAWAT INAP',
+  'POLI KLINIK RAWAT JALAN','INSTALASI GAWAT DARURAT','RADIOLOGI','LABORATORIUM','NS ROSALINA','NS TERATAI',
+  'NS ANTURIUM','NS ALAMANDA','NS BERSALIN','NS PERINATOLOGI','UMUM RT','ICU','OK','KEPERAWATAN','KEUANGAN',
+  'TPP','IT','GIZI','HEMODIALISA','LAUNDRY + KEBERSIHAN','KEPEGAWAIAN & DIKLAT','MARKETING','INFORMASI & KOMPLAIN',
+  'YANJANGMED','TIM PMKP','TIM PPI','TIM K3','DIREKSI','REKAM MEDIS','AKUNTANSI & PERPAJAKAN','SEKRETARIAT',
+  'CLEANING SERVICE (CS)','DRIVER & SECURITY','KASIR RAWAT INAP','KASIR RAWAT JALAN','TIM PENGENDALI BPJS (Casemix)',
+  'NS LOTUS','NS TULIP','KOMITE KEPERAWATAN','TIM PKRS'
+];
+$isLain = !in_array($data['ditujukan_kepada'] ?? '', $masterDitujukanKepada, true);
+$DitujukanKepadaLainValue = $isLain ? ($data['ditujukan_kepada'] ?? '') : '';
 
 if (!$data) {
     echo "Data tidak ditemukan.";
@@ -115,10 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo "Gagal mengupdate surat: " . mysqli_error($conn);
     }
 }
+
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -255,8 +265,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 .user-menu a:hover {
   background-color: #f0f0f0;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -273,12 +305,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -343,55 +384,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div class="status-row">
       <label for="ditujukan_kepada">Ditujukan Kepada</label>
-      <select name="ditujukan_kepada" id="ditujukan_kepada-select" required>
-        <option value="">---Pilih---</option>
-        <option value="">---Pilih---</option>
-        <option value="GUDANG FARMASI" <?= ($data['ditujukan_kepada'] == 'GUDANG FARMASI') ? 'selected' : '' ?>>GUDANG FARMASI</option>
-        <option value="GUDANG LOGISTIK" <?= ($data['ditujukan_kepada'] == 'GUDANG LOGISTIK') ? 'selected' : '' ?>>GUDANG LOGISTIK</option>
-        <option value="GUDANG FIX ASET" <?= ($data['ditujukan_kepada'] == 'GUDANG FIX ASET') ? 'selected' : '' ?>>GUDANG FIX ASET</option>
-        <option value="FARMASI RAWAT JALAN" <?= ($data['ditujukan_kepada'] == 'FARMASI RAWAT JALAN') ? 'selected' : '' ?>>FARMASI RAWAT JALAN</option>
-        <option value="FARMASI RAWAT INAP" <?= ($data['ditujukan_kepada'] == 'FARMASI RAWAT INAP') ? 'selected' : '' ?>>FARMASI RAWAT INAP</option>
-        <option value="POLI KLINIK RAWAT JALAN" <?= ($data['ditujukan_kepada'] == 'POLI KLINIK RAWAT JALAN') ? 'selected' : '' ?>>POLI KLINIK RAWAT JALAN</option>
-        <option value="INSTALASI GAWAT DARURAT" <?= ($data['ditujukan_kepada'] == 'INSTALASI GAWAT DARURAT') ? 'selected' : '' ?>>INSTALASI GAWAT DARURAT</option>
-        <option value="RADIOLOGI" <?= ($data['ditujukan_kepada'] == 'RADIOLOGI') ? 'selected' : '' ?>>RADIOLOGI</option>
-        <option value="LABORATORIUM" <?= ($data['ditujukan_kepada'] == 'LABORATORIUM') ? 'selected' : '' ?>>LABORATORIUM</option>
-        <option value="NS ROSALINA" <?= ($data['ditujukan_kepada'] == 'NS ROSALINA') ? 'selected' : '' ?>>NS ROSALINA</option>
-        <option value="NS TERATAI" <?= ($data['ditujukan_kepada'] == 'NS TERATAI') ? 'selected' : '' ?>>NS TERATAI</option>
-        <option value="NS ANTURIUM" <?= ($data['ditujukan_kepada'] == 'NS ANTURIUM') ? 'selected' : '' ?>>NS ANTURIUM</option>
-        <option value="NS ALAMANDA" <?= ($data['ditujukan_kepada'] == 'NS ALAMANDA') ? 'selected' : '' ?>>NS ALAMANDA</option>
-        <option value="NS BERSALIN" <?= ($data['ditujukan_kepada'] == 'NS BERSALIN') ? 'selected' : '' ?>>NS BERSALIN</option>
-        <option value="NS PERINATOLOGI" <?= ($data['ditujukan_kepada'] == 'NS PERINATOLOGI') ? 'selected' : '' ?>>NS PERINATOLOGI</option>
-        <option value="UMUM RT" <?= ($data['ditujukan_kepada'] == 'UMUM RT') ? 'selected' : '' ?>>UMUM RT</option>
-        <option value="ICU" <?= ($data['ditujukan_kepada'] == 'ICU') ? 'selected' : '' ?>>ICU</option>
-        <option value="OK" <?= ($data['ditujukan_kepada'] == 'OK') ? 'selected' : '' ?>>OK</option>
-        <option value="KEPERAWATAN" <?= ($data['ditujukan_kepada'] == 'KEPERAWATAN') ? 'selected' : '' ?>>KEPERAWATAN</option>
-        <option value="KEUANGAN" <?= ($data['ditujukan_kepada'] == 'KEUANGAN') ? 'selected' : '' ?>>KEUANGAN</option>
-        <option value="TPP" <?= ($data['ditujukan_kepada'] == 'TPP') ? 'selected' : '' ?>>TPP</option>
-        <option value="IT" <?= ($data['ditujukan_kepada'] == 'IT') ? 'selected' : '' ?>>IT</option>
-        <option value="GIZI" <?= ($data['ditujukan_kepada'] == 'GIZI') ? 'selected' : '' ?>>GIZI</option>
-        <option value="HEMODIALISA" <?= ($data['ditujukan_kepada'] == 'HEMODIALISA') ? 'selected' : '' ?>>HEMODIALISA</option>
-        <option value="LAUNDRY + KEBERSIHAN" <?= ($data['ditujukan_kepada'] == 'LAUNDRY + KEBERSIHAN') ? 'selected' : '' ?>>LAUNDRY + KEBERSIHAN</option>
-        <option value="KEPEGAWAIAN & DIKLAT" <?= ($data['ditujukan_kepada'] == 'KEPEGAWAIAN & DIKLAT') ? 'selected' : '' ?>>KEPEGAWAIAN & DIKLAT</option>
-        <option value="MARKETING" <?= ($data['ditujukan_kepada'] == 'MARKETING') ? 'selected' : '' ?>>MARKETING</option>
-        <option value="INFORMASI & KOMPLAIN" <?= ($data['ditujukan_kepada'] == 'INFORMASI & KOMPLAIN') ? 'selected' : '' ?>>INFORMASI & KOMPLAIN</option>
-        <option value="YANJANGMED" <?= ($data['ditujukan_kepada'] == 'YANJANGMED') ? 'selected' : '' ?>>YANJANGMED</option>
-        <option value="TIM PMKP" <?= ($data['ditujukan_kepada'] == 'TIM PMKP') ? 'selected' : '' ?>>TIM PMKP</option>
-        <option value="TIM PPI" <?= ($data['ditujukan_kepada'] == 'TIM PPI') ? 'selected' : '' ?>>TIM PPI</option>
-        <option value="TIM K3" <?= ($data['ditujukan_kepada'] == 'TIM K3') ? 'selected' : '' ?>>TIM K3</option>
-        <option value="DIREKSI" <?= ($data['ditujukan_kepada'] == 'DIREKSI') ? 'selected' : '' ?>>DIREKSI</option>
-        <option value="REKAM MEDIS" <?= ($data['ditujukan_kepada'] == 'REKAM MEDIS') ? 'selected' : '' ?>>REKAM MEDIS</option>
-        <option value="AKUNTANSI & PERPAJAKAN" <?= ($data['ditujukan_kepada'] == 'AKUNTANSI & PERPAJAKAN') ? 'selected' : '' ?>>AKUNTANSI & PERPAJAKAN</option>
-        <option value="SEKRETARIAT" <?= ($data['ditujukan_kepada'] == 'SEKRETARIAT') ? 'selected' : '' ?>>SEKRETARIAT</option>
-        <option value="CLEANING SERVICE (CS)" <?= ($data['ditujukan_kepada'] == 'CLEANING SERVICE (CS)') ? 'selected' : '' ?>>CLEANING SERVICE (CS)</option>
-        <option value="DRIVER & SECURITY" <?= ($data['ditujukan_kepada'] == 'DRIVER & SECURITY') ? 'selected' : '' ?>>DRIVER & SECURITY</option>
-        <option value="KASIR RAWAT INAP" <?= ($data['ditujukan_kepada'] == 'KASIR RAWAT INAP') ? 'selected' : '' ?>>KASIR RAWAT INAP</option>
-        <option value="KASIR RAWAT JALAN" <?= ($data['ditujukan_kepada'] == 'KASIR RAWAT JALAN') ? 'selected' : '' ?>>KASIR RAWAT JALAN</option>
-        <option value="TIM PENGENDALI BPJS (Casemix)" <?= ($data['ditujukan_kepada'] == 'TIM PENGENDALI BPJS (Casemix)') ? 'selected' : '' ?>>TIM PENGENDALI BPJS (Casemix)</option>
-        <option value="NS LOTUS" <?= ($data['ditujukan_kepada'] == 'NS LOTUS') ? 'selected' : '' ?>>NS LOTUS</option>
-        <option value="NS TULIP" <?= ($data['ditujukan_kepada'] == 'NS TULIP') ? 'selected' : '' ?>>NS TULIP</option>
-        <option value="KOMITE KEPERAWATAN" <?= ($data['ditujukan_kepada'] == 'KOMITE KEPERAWATAN') ? 'selected' : '' ?>>KOMITE KEPERAWATAN</option>
-        <option value="TIM PKRS" <?= ($data['ditujukan_kepada'] == 'TIM PKRS') ? 'selected' : '' ?>>TIM PKRS</option>
+      <select name="ditujukan_kepada" id="ditujukan_kepada-select" required onchange="toggleDitujukanKepadaLain(this)">
+          <option value="">---Pilih---</option>
+          <?php foreach ($masterDitujukanKepada as $opt): ?>
+            <option value="<?= $opt ?>" <?= ($data['ditujukan_kepada']===$opt ? 'selected' : '') ?>><?= $opt ?></option>
+          <?php endforeach; ?>
+          <option value="lain" <?= $isLain ? 'selected' : '' ?>>Lain-lain</option>
       </select>
+      <div id="lainnya-container" style="margin-top:10px; display: <?= $isLain ? 'block':'none' ?>;">
+          <input type="text" name="ditujukan_kepada_lain" id="ditujukan_kepada_lain" placeholder="..."
+                value="<?= htmlspecialchars($DitujukanKepadaLainValue) ?>" <?= $isLain ? 'required' : '' ?> />
+      </div>
     </div>
 
 
@@ -451,24 +454,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
 
   <script>
-    // Fungsi untuk menampilkan dropdown ketika status dipilih
-    function toggleDropdown(select) {
-      var statusRow = document.querySelector('.status-row');
-      var statusDisplay = document.getElementById('status-display');
-      var statusDropdown = document.querySelector('.status-dropdown');
-
-      if (select.value !== "") {
-        statusDropdown.style.display = 'block'; // Tampilkan dropdown
-        statusDisplay.textContent = select.options[select.selectedIndex].text; // Tampilkan status yang dipilih
-      } else {
-        statusDropdown.style.display = 'none'; // Sembunyikan dropdown jika tidak ada pilihan
-      }
-    }
           // === DROPDOWN USER LOGIN ===
   const userIcon = document.querySelector(".user-icon");
   const userMenu = document.getElementById("userMenu");
@@ -479,11 +469,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     });
   }
 
-  document.addEventListener("click", function (e) {
-    if (userMenu && !userIcon.contains(e.target)) {
-      userMenu.style.display = "none";
-    }
+  document.addEventListener("DOMContentLoaded", function () {
+    const DitujukanKepadaiSelect = document.getElementById('ditujukan_kepada-select');
+    if (DitujukanKepadaSelect) toggleDitujukanKepadaLain(DitujukanKepadaSelect);
   });
+
+  function toggleDitujukanKepadaLain(selectElement) {
+    const lainnyaContainer = document.getElementById('lainnya-container');
+    const inputLain = document.getElementById('ditujukan_kepada_lain');
+    if (!lainnyaContainer || !inputLain) return;
+
+    if (selectElement.value === 'lain') {
+      lainnyaContainer.style.display = 'block';
+      inputLain.setAttribute('required', 'required');
+    } else {
+      lainnyaContainer.style.display = 'none';
+      inputLain.removeAttribute('required');
+    }
+  }
 
       async function loadKota() {
     const res = await fetch("https://www.emsifa.com/api-wilayah-indonesia/api/regencies.json");

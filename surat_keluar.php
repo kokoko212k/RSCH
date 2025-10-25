@@ -18,6 +18,12 @@ include 'config.php';
 function h(?string $s): string {
     return htmlspecialchars($s ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
+function fmt_tgl(?string $s): string {
+    if (empty($s) || $s === '0000-00-00') return '-';
+    $ts = strtotime($s);
+    return $ts ? date('d-m-Y', $ts) : '-';
+}
+
 
 // ====== AJAX: simpan NOTE dari surat_keluar ======
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_note'], $_POST['id'])) {
@@ -90,17 +96,7 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id']) && isset($_POST['tanggal_disposisi'])) {
-    header('Content-Type: text/plain');
-    $id = $_POST['id'];
-    $tanggal_disposisi = $_POST['tanggal_disposisi'];
 
-    $stmt = $pdo->prepare("UPDATE surat_keluar SET tanggal_disposisi = :tanggal WHERE id = :id");
-    $stmt->execute(['tanggal' => $tanggal_disposisi, 'id' => $id]);
-
-    echo "OK";
-    exit();
-}
 $noSuratResult = mysqli_query($conn, "SELECT DISTINCT no_surat FROM surat_keluar");
 $ditujukanKepadaResult = mysqli_query($conn, "SELECT DISTINCT ditujukan_kepada FROM surat_keluar");
 $perihalResult = mysqli_query($conn, "SELECT DISTINCT perihal FROM surat_keluar");
@@ -115,13 +111,14 @@ $result = mysqli_query($conn, "SELECT * FROM surat_keluar ORDER BY id DESC");
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     $tanggal = $_POST['tanggal'];
     $tanggal_diterima = date('Y-m-d'); // otomatis
-    $tanggal_disposisi = null; // kosong dulu, diisi nanti di halaman utama
     $no_surat = $_POST['no_surat'];
     $ditujukan_kepada = $_POST['ditujukan_kepada'];
     $perihal = $_POST['perihal'];
     // $keterangan = $_POST['keterangan'];
     $instruksi = $_POST['instruksi'];
     $note = isset($_POST['note']) ? trim($_POST['note']) : null;
+
+    $tanggal_disposisi_auto = (strtolower($instruksi) === 'diteruskan langsung') ? date('Y-m-d') : null;
 
     $stmt = $pdo->prepare("INSERT INTO surat_keluar 
         (tanggal, tanggal_diterima, tanggal_disposisi, no_surat, ditujukan_kepada, perihal, instruksi, note) 
@@ -130,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     $stmt->execute([
         'tanggal' => $tanggal,
         'tanggal_diterima' => $tanggal_diterima,
-        'tanggal_disposisi' => $tanggal_disposisi,
+        'tanggal_disposisi' => $tanggal_disposisi_auto,
         'no_surat' => $no_surat,
         'ditujukan_kepada' => $ditujukan_kepada,
         'perihal' => $perihal,
@@ -143,48 +140,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
 
     }
 
-// Proses update disposisi_kepada dan tanggal_disposisi jika dikirim dari form
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) {
-    $id = $_POST['id'] ?? null;
-    $disposisi_kepada = $_POST['disposisi_kepada'] ?? null;
-    $tanggal_disposisi = $_POST['tanggal_disposisi'] ?? date('Y-m-d');
+// --- UPDATE instruksi & set tanggal_disposisi otomatis ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_instruksi'])) {
+  $id        = (int)($_POST['id'] ?? 0);
+  $instruksi = trim($_POST['instruksi'] ?? '');
 
-    if ($id && $disposisi_kepada) {
-        $stmt = $pdo->prepare("UPDATE surat_keluar 
-                               SET disposisi_kepada = :disposisi_kepada, 
-                                   tanggal_disposisi = :tanggal_disposisi 
-                               WHERE id = :id");
-        $stmt->execute([
-            'disposisi_kepada' => $disposisi_kepada,
-            'tanggal_disposisi' => $tanggal_disposisi,
-            'id' => $id
-        ]);
+  if ($id > 0) {
+    $sql = "
+      UPDATE surat_keluar
+      SET instruksi = :instruksi,
+          tanggal_disposisi = CASE
+            WHEN LOWER(:instr_norm) = 'diteruskan langsung'
+                 AND (tanggal_disposisi IS NULL OR tanggal_disposisi = '')
+            THEN CURDATE()
+            ELSE tanggal_disposisi
+          END
+      WHERE id = :id
+    ";
+    $pdo->prepare($sql)->execute([
+      'instruksi'  => $instruksi,
+      'instr_norm' => mb_strtolower($instruksi, 'UTF-8'),
+      'id'         => $id,
+    ]);
 
-        $stmtGet = $pdo->prepare("SELECT no_surat, perihal, file_url FROM surat_keluar WHERE id = ?");
-        $stmtGet->execute([$id]);
-        $row = $stmtGet->fetch(PDO::FETCH_ASSOC);
-
-        if ($row) {
-            $stmtNotif = $pdo->prepare("INSERT INTO surat_notif 
-                (tanggal, no_surat, file_url, waktu) 
-                VALUES (:tanggal, :no_surat, :file_url, NOW())");
-
-            $stmtNotif->execute([
-                'tanggal' => date('Y-m-d'),
-                'no_surat' => $row['no_surat'],
-                'file_url' => $row['file_url'],
-            ]);
-        }
-
-        header("Location: surat_keluar.php");
-        exit();
-    }
+    // kirim string tanggal (YYYY-MM-DD) ke front-end biar bisa update tampilan tanpa reload
+    $tgl = $pdo->query("SELECT tanggal_disposisi FROM surat_keluar WHERE id = ".(int)$id)->fetchColumn();
+    header('Content-Type: application/json');
+    echo json_encode(['ok'=>true,'tanggal_disposisi'=>$tgl]);
+    exit;
+  }
+  http_response_code(400);
+  echo json_encode(['ok'=>false]);
+  exit;
 }
+
+
+
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
-
-
 <DOCTYPE html>
 <html lang="id">
 <head>
@@ -573,11 +566,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
 }
 .export-item:hover { background:#f2f6ff; }
 .export-dropdown.open .export-menu { display:block; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
+
+/* [TAMBAH] sedikit gaya buat tombol chat */
+.btn-chat{
+  background:#eef4ff; border:1px solid #cfe0ff;
+  padding:6px 10px; border-radius:6px; cursor:pointer;
+}
+.btn-chat[disabled]{ opacity:.5; cursor:not-allowed; }
+
+/* (opsional) gaya kontainer chat biar rapi */
+.chat-container { display:flex; flex-direction:column; gap:10px; padding:10px; }
 
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -594,12 +619,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -749,16 +783,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                       </select>
                     </div>
                 </th>
-               
                 <th>File</th>
+                <th>Pesan</th>
                 <th>Aksi</th>
             </tr>
 
           <?php while ($row = mysqli_fetch_assoc($result)): ?>
-              <?php 
-              $instruksi = isset($row['instruksi']) ? strtolower($row['instruksi']) : '';
-              $isEditable = ($instruksi === 'diterima' || $instruksi === 'diteruskan');
-              ?>
               <tr class="data-row"
                 data-tanggal="<?= $row['tanggal'] ?>"
                 data-tanggal_diterima="<?= $row['tanggal_diterima'] ?>"
@@ -769,14 +799,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 data-instruksi="<?= $row['instruksi'] ?>"
                 data-note="<?= htmlspecialchars($row['note']) ?>"
                 data-file="<?= $row['file_url'] ?>">
-                <td><?= date('d-m-Y', strtotime($row['tanggal'])) ?></td>
-                <td><?= !empty($row['tanggal_diterima']) ? date('d-m-Y', strtotime($row['tanggal_diterima'])) : '-' ?></td>
-                <td>
-                    <input type="date"
-                        value="<?= $row['tanggal_disposisi'] ?>"
-                        onchange="updateTanggalDisposisi(<?= $row['id'] ?>, this.value)"
-                        <?= $isEditable ? '' : 'disabled' ?>>
-                </td>
+                <td><?= fmt_tgl($row['tanggal'] ?? null) ?></td>
+                <td><?= fmt_tgl($row['tanggal_diterima'] ?? null) ?></td>
+                <td id="td-tgldisp-<?= (int)$row['id'] ?>"><?= fmt_tgl($row['tanggal_disposisi'] ?? null) ?></td>
                 <td><?= $row['no_surat'] ?></td>
                 <td><?= $row['ditujukan_kepada'] ?></td>
                 <td><?= $row['perihal'] ?></td>
@@ -785,6 +810,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                   <textarea
                     class="note-view"
                     readonly
+                    placeholder="..."                    
                     style="width:220px; min-height:60px; resize:vertical; background:#fff;"
                   ><?= htmlspecialchars($row['note'] ?? '') ?></textarea>
                 </td>
@@ -803,6 +829,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 <?php else: ?>
                     -
                 <?php endif; ?>
+                </td>
+                <td>
+                  <?php if (!empty($row['ditujukan_kepada'])): ?>
+                    <a class="btn-chat"
+                      href="pesan_lihat_5.php?no_surat=<?= urlencode($row['no_surat']) ?>"
+                      title="Buka halaman pesan untuk <?= htmlspecialchars($row['no_surat']) ?>">
+                      💬
+                    </a>
+                  <?php else: ?>
+                    <button class="btn-chat" disabled title="Isi 'Ditujukan Kepada' dulu">💬</button>
+                  <?php endif; ?>
                 </td>
                 <td>
                     <a href="update_surat_keluar.php?id=<?= $row['id'] ?>">✏️</a><br>
@@ -851,7 +888,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script>
@@ -873,16 +910,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
   </script>
   <script src="script.js"></script>
   <script>
-  function filterTable(attribute, value) {
+function filterTable(attribute, value) {
   const rows = document.querySelectorAll('.data-row');
+  const filterValue = (value || '').toLowerCase();
   rows.forEach(row => {
-    if (value === "" || row.dataset[attribute.toLowerCase()] === value) {
-      row.style.display = "table-row";
-    } else {
-      row.style.display = "none";
-    }
+    const cellValue = (row.getAttribute('data-' + attribute) || '').toLowerCase();
+    row.style.display = (!filterValue || cellValue.includes(filterValue)) ? "table-row" : "none";
   });
-  }
+}
+
 
 (function(){
   const dd  = document.querySelector('.export-dropdown');
@@ -1020,20 +1056,7 @@ function exportTableToExcel(last3Months) {
   }
 }
 
-function updateTanggalDisposisi(id, tanggal) {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "surat_keluar.php", true);
-    xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
-    xhr.send("id=" + id + "&tanggal_disposisi=" + tanggal);
 
-    xhr.onload = function () {
-        if (xhr.status === 200) {
-            console.log("Tanggal disposisi diperbarui.");
-        } else {
-            alert("Gagal update tanggal disposisi.");
-        }
-    };
-}
 
 function showResetButton() {
   const resetContainer = document.getElementById('reset-container');
@@ -1063,8 +1086,31 @@ document.addEventListener('DOMContentLoaded', () => {
   // panggil sekali saat load untuk set keadaan awal
   showResetButton();
 });
+  </script>
+<script>
+function fmtTglDDMMYYYY(yyyy_mm_dd){
+  if(!yyyy_mm_dd) return '-';
+  const [y,m,d] = yyyy_mm_dd.split('-');
+  if(!y||!m||!d) return '-';
+  return `${d}-${m}-${y}`;
+}
 
+function onUpdateInstruksi(id, instruksi){
+  const fd = new URLSearchParams();
+  fd.set('update_instruksi','1');
+  fd.set('id', id);
+  fd.set('instruksi', instruksi);
 
-  </script>  
+  fetch('', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:fd })
+    .then(r => r.json())
+    .then(({ok, tanggal_disposisi}) => {
+      if(!ok) throw new Error('Gagal update');
+      // update kolom tanggal_disposisi di UI
+      const td = document.getElementById('td-tgldisp-'+id);
+      if (td) td.textContent = fmtTglDDMMYYYY(tanggal_disposisi || '');
+    })
+    .catch(err => alert(err.message));
+}
+</script>
 </body>
 </html>  

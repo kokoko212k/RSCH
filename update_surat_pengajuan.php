@@ -1,125 +1,147 @@
 <?php
 session_start();
-
-$host = "localhost";
-$user = "root";
-$pass = "";
-$db = "rsch";
-
-$conn = mysqli_connect($host, $user, $pass, $db);
-
-if (!$conn) {
-    die("Koneksi gagal: " . mysqli_connect_error());
-}
-
-include 'config.php';
+include 'config.php'; // menyediakan $pdo (PDO)
 
 if (!isset($_SESSION['user'])) {
     header('Location: login.php');
     exit();
 }
 
-$user = $_SESSION['user'] ?? null;
-$role = $user['status'] ?? null;
-$eofficeAll = [
-  'surat_masuk.php'                   => 'Surat Masuk',
-  'surat_keluar.php'                  => 'Surat Keluar',
-  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
-  'surat_disposisi.php'               => 'Disposisi Surat',
-  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
-  'surat_notif.php'                   => 'Surat Notif',
-  'surat_pengajuan.php'               => 'Pengajuan',
-];
+$user        = $_SESSION['user'];
+$role        = $user['status'] ?? null;
+$loginUserId = (int)($user['id'] ?? 0);
+$nik         = $user['nik'] ?? null;
+$unit        = $user['unit'] ?? null;
 
-$rolePages = [
-  'Super Admin' => array_keys($eofficeAll), // semua
-  'Sekretariat' => [
-    'surat_masuk.php',
-    'surat_keluar.php',
-    'surat_disposisi_pengajuan.php',
-  ],
-  'Direktur' => [
-    'surat_disposisi.php',
-    'surat_notif.php',
-  ],
-  'Admin' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-  'Member' => [
-    'surat_notif.php',
-    'surat_pengajuan.php',
-  ],
-];
-
-// Tentukan halaman yang boleh tampil untuk role saat ini
-$allowedEofficePages = $rolePages[$role] ?? [];
-$can_access_eoffice  = !empty($allowedEofficePages);
-// Ambil ID dari URL
-$id = $_GET['id'] ?? null;
-
-if (!$id) {
-    echo "ID tidak ditemukan.";
-    exit();
+/* ================== HITUNG BADGE NOTIF (opsional) ================== */
+$jumlahNotif = 0;
+if ($loginUserId > 0) {
+  $stmtCnt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM notifikasi_targets t
+    LEFT JOIN detail_notifikasi d
+      ON d.notifikasi_id = t.notifikasi_id
+     AND d.user_id       = t.user_id
+    WHERE t.user_id = ?
+      AND d.read_at IS NULL
+  ");
+  $stmtCnt->execute([$loginUserId]);
+  $jumlahNotif = (int)$stmtCnt->fetchColumn();
 }
 
-// Ambil data lama
-$stmt = mysqli_prepare($conn, "SELECT * FROM surat_pengajuan WHERE id = ?");
-mysqli_stmt_bind_param($stmt, "i", $id);
-mysqli_stmt_execute($stmt);
-$result = mysqli_stmt_get_result($stmt);
-$data = mysqli_fetch_assoc($result);
-
-if (!$data) {
-    echo "Data tidak ditemukan.";
-    exit();
+/* ================== TENTUKAN SCOPE (pakai named placeholder!) ================== */
+$scopeSql  = '1=0';
+$scopeBind = [];
+switch ($role) {
+  case 'Super Admin':
+    $scopeSql = '1=1';
+    break;
+  case 'Sekretariat':
+    $scopeSql              = 'pengajuan_unit = :scope_unit';
+    $scopeBind[':scope_unit'] = $unit;
+    break;
+  default: // Direktur/Admin/Member
+    $scopeSql            = 'pengajuan_nik = :scope_nik';
+    $scopeBind[':scope_nik'] = $nik;
+    break;
 }
 
-// Proses update
+/* ================== AMBIL ID ================== */
+$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+if ($id <= 0) { die('ID tidak ditemukan.'); }
+
+/* ================== AMBIL DATA LAMA DENGAN SCOPE (anti-IDOR) ================== */
+$sqlGet  = "SELECT * FROM surat_pengajuan WHERE id = :id AND ($scopeSql) LIMIT 1";
+$params  = array_merge([':id' => $id], $scopeBind);
+$stmtGet = $pdo->prepare($sqlGet);
+$stmtGet->execute($params);
+$data = $stmtGet->fetch(PDO::FETCH_ASSOC);
+if (!$data) { die('Data tidak ditemukan / akses ditolak.'); }
+
+/* simpan owner untuk notifikasi */
+$ownerNik  = $data['pengajuan_nik']  ?? null;
+$ownerUnit = $data['pengajuan_unit'] ?? null;
+
+/* ================== PROSES UPDATE ================== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $tanggal = $_POST['tanggal'];
-    $no_surat = $_POST['no_surat'];
-    $dari = $_POST['dari'];
+    $tanggal  = trim($_POST['tanggal']  ?? '');
+    $no_surat = trim($_POST['no_surat'] ?? '');
+    $dari     = trim($_POST['dari']     ?? '');
 
-        // Default: file lama
-    $file_name = $data['file_url'];
-
-    if (isset($_FILES["file_url"]) && $_FILES["file_url"]["error"] === UPLOAD_ERR_OK) {
-        $file_name = basename($_FILES["file_url"]["name"]);
-        $target_dir = "uploads/";
-        $file_path = $target_dir . $file_name;
-
-        $allowed_types = ['application/pdf'];
-        if (in_array($_FILES['file_url']['type'], $allowed_types) && $_FILES['file_url']['size'] <= 5 * 1024 * 1024) {
-            if (move_uploaded_file($_FILES["file_url"]["tmp_name"], $file_path)) {
-                $query = "UPDATE surat_pengajuan SET tanggal=?, no_surat=?, dari=?, file_url=? WHERE id=?";
-                $stmt = mysqli_prepare($conn, $query);
-                mysqli_stmt_bind_param($stmt, "ssssi", $tanggal, $no_surat, $dari, $file_name, $id);
-            } else {
-                echo "Gagal mengunggah file.";
-                exit();
-            }
-        } else {
-            echo "File harus PDF dan maksimal 5MB.";
-            exit();
-        }
-    } else {
-        // Jika tidak upload file baru
-        $query = "UPDATE surat_pengajuan SET tanggal=?, no_surat=?, dari=?, file_url=? WHERE id=?";
-        $stmt = mysqli_prepare($conn, $query);
-        mysqli_stmt_bind_param($stmt, "ssssi", $tanggal, $no_surat, $dari, $file_name, $id);
+    if ($tanggal === '' || $no_surat === '' || $dari === '') {
+      die("Tanggal, No. Surat, dan Dari wajib diisi.");
     }
 
-    if (mysqli_stmt_execute($stmt)) {
+    // default: pakai file lama
+    $file_path_to_save = $data['file_url'];
+
+    // jika upload file baru
+    if (isset($_FILES['file_url']) && $_FILES['file_url']['error'] === UPLOAD_ERR_OK) {
+        $target_dir = "pengajuan/files/"; // konsisten dgn create
+        if (!is_dir($target_dir)) mkdir($target_dir, 0755, true);
+
+        $allowed_types = ['application/pdf'];
+        $file_name = basename($_FILES['file_url']['name']);
+        $file_tmp  = $_FILES['file_url']['tmp_name'];
+        $file_type = $_FILES['file_url']['type'];
+        $file_size = $_FILES['file_url']['size'];
+        $file_path = $target_dir . $file_name;
+
+        if (!in_array($file_type, $allowed_types, true)) {
+            die("File harus PDF.");
+        }
+        if ($file_size > 5 * 1024 * 1024) {
+            die("Maksimal ukuran file 5MB.");
+        }
+        if (!move_uploaded_file($file_tmp, $file_path)) {
+            die("Gagal mengunggah file.");
+        }
+        $file_path_to_save = $file_path;
+    }
+
+    // UPDATE dengan scope (named placeholder juga)
+    $sqlUpd = "
+      UPDATE surat_pengajuan
+         SET tanggal  = :tanggal,
+             no_surat = :no_surat,
+             dari     = :dari,
+             file_url = :file_url
+       WHERE id       = :id
+         AND ($scopeSql)
+       LIMIT 1
+    ";
+
+    $updParams = array_merge([
+      ':tanggal'  => $tanggal,
+      ':no_surat' => $no_surat,
+      ':dari'     => $dari,
+      ':file_url' => $file_path_to_save,
+      ':id'       => $id,
+    ], $scopeBind);
+
+    $pdo->beginTransaction();
+    $stmtUpd = $pdo->prepare($sqlUpd);
+    $ok      = $stmtUpd->execute($updParams);
+    $affected= $stmtUpd->rowCount(); // rows yang benar-benar tersentuh
+
+    if ($ok) {
+        // kirim notifikasi UPDATE (kalau fungsinya ada)
+        if (function_exists('buat_notif_dari_surat_pengajuan')) {
+          buat_notif_dari_surat_pengajuan($pdo, $id, 'update', $ownerNik, $ownerUnit);
+        }
+        $pdo->commit();
         header('Location: surat_pengajuan.php?success=2');
         exit();
     } else {
-        echo "Gagal mengupdate surat: " . mysqli_error($conn);
+        $pdo->rollBack();
+        die('Gagal mengupdate surat.');
     }
 }
+
+/* ================== (opsional) render form edit di bawah ini ================== */
+// $data sudah siap untuk prefilling form
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -256,8 +278,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 .user-menu a:hover {
   background-color: #f0f0f0;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -274,12 +318,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -392,7 +445,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
 

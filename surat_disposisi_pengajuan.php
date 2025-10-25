@@ -3,7 +3,7 @@ session_start();
 include 'config.php';
 
 $user = $_SESSION['user'] ?? null;
-$user_id = $user['user']['id'] ?? null;
+$user_id = $user['id'] ?? null;
 $role = $user['status'] ?? null;
 $eofficeAll = [
   'surat_masuk.php'                   => 'Surat Masuk',
@@ -42,11 +42,6 @@ $can_access_eoffice  = !empty($allowedEofficePages);
 date_default_timezone_set('Asia/Jakarta');
 $tanggal_hari_ini = date('Y-m-d');
 
-// if (isset($_SESSION['flash'])) {
-//     echo "<script>alert('{$_SESSION['flash']}');</script>";
-//     unset($_SESSION['flash']);
-// }
-
 // Reset session
 unset($_SESSION['buka_disposisi_pengajuan']);
 
@@ -56,113 +51,163 @@ if (!$user) {
     exit;
 }
 
-// Proses update instruksi
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['instruksi'], $_POST['id'])) {
-    $id = $_POST['id'];
-    $instruksi = trim($_POST['instruksi']);
+/* =========================================================
+   PROSES UPDATE ARAHAN (disposisi_pengajuan & pengajuan SAJA)
+   — Tidak ada lagi sinkron ke surat_masuk / surat_disposisi
+   ========================================================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['arahan'], $_POST['id'])) {
+    $id      = (int)$_POST['id'];
+    $arahan  = trim($_POST['arahan']);
 
     $stmt = $pdo->prepare("SELECT * FROM surat_disposisi_pengajuan WHERE id = :id");
     $stmt->execute(['id' => $id]);
     $data = $stmt->fetch();
 
-    if ($data) {
-        $file_url = $data['file_url'];
+    header('Content-Type: text/plain; charset=UTF-8');
 
-        // Update disposisi_pengajuan
-        $stmt = $pdo->prepare("UPDATE surat_disposisi_pengajuan SET instruksi = :instruksi, status = 'Telah Diproses' WHERE id = :id");
-        $stmt->execute(['instruksi' => $instruksi, 'id' => $id]);
+    if (!$data) { echo 'not_found'; exit; }
 
-        // Update instruksi ke surat_pengajuan
-        $stmt = $pdo->prepare("UPDATE surat_pengajuan SET instruksi = :instruksi WHERE file_url = :file_url");
-        $stmt->execute(['instruksi' => $instruksi, 'file_url' => $file_url]);
+    $file_url = $data['file_url'];
 
-        // Jika instruksi == Diterima, maka salin ke surat_masuk & surat_disposisi
-        if ($instruksi === "Diterima") {
-            $stmt = $pdo->prepare("SELECT * FROM surat_pengajuan WHERE file_url = :file_url");
-            $stmt->execute(['file_url' => $file_url]);
-            $pengajuan = $stmt->fetch();
+    // Update di tabel disposisi_pengajuan → pakai kolom ARAHAN
+    $stmt = $pdo->prepare("
+        UPDATE surat_disposisi_pengajuan 
+        SET arahan = :a, status = 'Telah Diproses' 
+        WHERE id = :id
+    ");
+    $stmt->execute(['a' => $arahan, 'id' => $id]);
 
-            if ($pengajuan) {
-                // -------------------------
-                // 1) Upsert surat_masuk
-                // -------------------------
-                $stmt = $pdo->prepare("
-                    UPDATE surat_masuk
-                    SET tanggal_surat = :tanggal_surat,
-                        dari = :dari,
-                        file_url = :file_url,
-                        tanggal_diterima = :tanggal_diterima,
-                        instruksi = 'Diterima'
-                    WHERE no_surat = :no_surat
-                    LIMIT 1
-                ");
-                $stmt->execute([
-                    'tanggal_surat'     => $pengajuan['tanggal'],
-                    'dari'              => $pengajuan['dari'],
-                    'file_url'          => $pengajuan['file_url'],
-                    'tanggal_diterima'  => $tanggal_hari_ini,
-                    'no_surat'          => $pengajuan['no_surat'],
-                ]);
+    // Sinkron ke surat_pengajuan (kolom ARAHAN juga)
+    $stmt = $pdo->prepare("UPDATE surat_pengajuan SET arahan = :a WHERE file_url = :u");
+    $stmt->execute(['a' => $arahan, 'u' => $file_url]);
+    // (opsional) simpan jejak ke surat_masuk.arahan kalau Disetujui
+    if ($arahan === 'Disetujui') {
+        // normalisasi key file
+        $file_raw  = $file_url;                      // ex: 'uploads/xxx.pdf' atau 'xxx.pdf'
+        $file_base = basename((string)$file_url);    // 'xxx.pdf'
 
-                if ($stmt->rowCount() === 0) {
-                    // Tidak ada baris cocok → INSERT baru
-                    $stmt = $pdo->prepare("
-                        INSERT INTO surat_masuk
-                        (tanggal_surat, no_surat, dari, file_url, tanggal_diterima, instruksi)
-                        VALUES (:tanggal_surat, :no_surat, :dari, :file_url, :tanggal_diterima, 'Diterima')
-                    ");
-                    $stmt->execute([
-                        'tanggal_surat'     => $pengajuan['tanggal'],
-                        'no_surat'          => $pengajuan['no_surat'],
-                        'dari'              => $pengajuan['dari'],
-                        'file_url'          => $pengajuan['file_url'],
-                        'tanggal_diterima'  => $tanggal_hari_ini,
-                    ]);
-                }
+        // --- Ambil fallback dari surat_pengajuan SEKALI di awal (dipakai beberapa tempat) ---
+        $src = $pdo->prepare("
+            SELECT *
+              FROM surat_pengajuan
+            WHERE file_url = :file_raw
+              OR file_url = :file_base
+              OR TRIM(no_surat) = TRIM(:no)
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $src->execute([
+            'file_raw'  => $file_raw,
+            'file_base' => $file_base,
+            'no'        => $data['no_surat'] ?? ''
+        ]);
+        $p = $src->fetch(PDO::FETCH_ASSOC) ?: [];
 
-                // -------------------------
-                // 2) Upsert surat_disposisi
-                // -------------------------
-                $stmt = $pdo->prepare("
-                    UPDATE surat_disposisi
-                    SET instruksi = 'Diterima',
-                        tanggal   = :tanggal
-                    WHERE (TRIM(no_surat) = TRIM(:no_surat) OR file_url = :file_url)
-                    ORDER BY id DESC
-                    LIMIT 1
-                ");
-                $stmt->execute([
-                    'tanggal'  => $tanggal_hari_ini,
-                    'no_surat' => $pengajuan['no_surat'],
-                    'file_url' => $pengajuan['file_url'],
-                ]);
+        // ---------------------------
+        // 1) sinkron ke SURAT MASUK
+        // ---------------------------
+        $u = $pdo->prepare("
+            UPDATE surat_masuk
+              SET arahan = 'Disetujui',
+                  tanggal_diterima = COALESCE(tanggal_diterima, CURDATE())
+            WHERE file_url = :file_raw
+              OR file_url = :file_base
+              OR TRIM(no_surat) = TRIM(:no)
+            LIMIT 1
+        ");
+        $u->execute([
+            'file_raw'  => $file_raw,
+            'file_base' => $file_base,
+            'no'        => $data['no_surat'] ?? ''
+        ]);
 
-                if ($stmt->rowCount() === 0) {
-                    // Tidak ada baris cocok → INSERT baru (akan muncul teratas bila view ORDER BY id DESC)
-                    $stmt = $pdo->prepare("
-                        INSERT INTO surat_disposisi
-                            (tanggal, no_surat, file_url)
-                        VALUES
-                            (:tanggal, :no_surat, :file_url)
-                    ");
-                    $stmt->execute([
-                        'tanggal'  => $tanggal_hari_ini,
-                        'no_surat' => $pengajuan['no_surat'],
-                        'file_url' => $pengajuan['file_url'],
-                    ]);
-                }
-            }
+        if ($u->rowCount() === 0) {
+            // siapkan nilai aman (fallback)
+            $tgl_surat = $data['tanggal'] ?? $p['tanggal'] ?? date('Y-m-d');
+            $no_surat  = $data['no_surat'] ?? $p['no_surat'] ?? '';
+            $dari      = $data['dari']     ?? $p['dari']     ?? '';
+            $perihal   = $p['perihal']     ?? '';
+
+            // simpan file_url konsisten 'uploads/...'
+            $file_store = (strpos($file_raw, 'uploads/') === 0) ? $file_raw : ('uploads/'.$file_base);
+
+            $ins = $pdo->prepare("
+                INSERT INTO surat_masuk
+                    (tanggal_surat, tanggal_diterima, no_surat, no_agenda,
+                    perihal, dari, keterangan, note, disposisi_kepada, file_url, arahan)
+                VALUES
+                    (:tgl_surat, CURDATE(), :no_surat, '', :perihal, :dari,
+                    '', '', '', :file_url, 'Disetujui')
+            ");
+            $ins->execute([
+                'tgl_surat' => $tgl_surat,
+                'no_surat'  => $no_surat,
+                'perihal'   => $perihal,
+                'dari'      => $dari,
+                'file_url'  => $file_store,
+            ]);
         }
 
-        header('Content-Type: text/plain; charset=UTF-8');
-        echo 'success';
-    } else {
-        echo 'not_found';
+        // ----------------------------------------
+        // 2) sinkron ke SURAT_DISPOSISI (baru kamu)
+        // ----------------------------------------
+        $sd_arahan = 'Disetujui';
+        $sd_status    = 'Telah Diproses';
+        $tgl_disp     = $data['tanggal'] ?? $p['tanggal'] ?? date('Y-m-d');
+
+        // coba UPDATE dulu
+        $updSd = $pdo->prepare("
+            UPDATE surat_disposisi
+              SET arahan = :arahan,
+                  status_disposisi = :status,
+                  tanggal = COALESCE(NULLIF(tanggal,''), :tgl)
+            WHERE file_url = :file_raw
+                OR file_url = :file_base
+                OR TRIM(no_surat) = TRIM(:no)
+            LIMIT 1
+        ");
+        $updSd->execute([
+            'arahan' => $sd_arahan,
+            'status'    => $sd_status,
+            'tgl'       => $tgl_disp,
+            'file_raw'  => $file_raw,
+            'file_base' => $file_base,
+            'no'        => $data['no_surat'] ?? ''
+        ]);
+
+        // jika belum ada → INSERT
+        if ($updSd->rowCount() === 0) {
+            $no_surat_dispo = $data['no_surat'] ?? ($p['no_surat'] ?? ($p['no_perihal'] ?? ''));
+            $ditujukan      = $p['ditujukan_kepada'] ?? ''; // opsional bila ada di pengajuan
+            $file_for_sd    = (strpos($file_raw, 'uploads/') === 0) ? $file_raw : ('uploads/'.$file_base);
+
+            $insSd = $pdo->prepare("
+                INSERT INTO surat_disposisi
+                    (tanggal, no_surat, ditujukan_kepada, arahan, status_disposisi, file_url)
+                VALUES
+                    (:tgl, :no, :ditujukan, :arahan, :status, :file)
+            ");
+            $insSd->execute([
+                'tgl'       => $tgl_disp,
+                'no'        => $no_surat_dispo,
+                'ditujukan' => $ditujukan,
+                'arahan'    => $sd_arahan,
+                'status'    => $sd_status,
+                'file'      => $file_for_sd,
+            ]);
+        }
     }
+  
+
+
+
+    echo 'success';
     exit();
 }
 
-// Proses hapus
+/* =========================================================
+   PROSES HAPUS
+   ========================================================= */
 if (isset($_GET['delete'])) {
     $stmt = $pdo->prepare("DELETE FROM surat_disposisi_pengajuan WHERE id = :id");
     $stmt->execute(['id' => $_GET['delete']]);
@@ -170,22 +215,28 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
+/* =========================================================
+   TAMBAH BARIS DISPOSISI PENGAJUAN DARI SURAT_PENGAJUAN
+   (kolom arahan dikosongkan)
+   ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cari_surat'])) {
     $no_surat = $_POST['no_surat'] ?? '';
-    $dari = $_POST['dari'] ?? '';
+    $dari     = $_POST['dari'] ?? '';
 
     $stmt = $pdo->prepare("SELECT * FROM surat_pengajuan WHERE no_surat = :no_surat AND dari = :dari");
     $stmt->execute(['no_surat' => $no_surat, 'dari' => $dari]);
     $data = $stmt->fetch();
 
     if ($data) {
-        $stmt = $pdo->prepare("INSERT INTO surat_disposisi_pengajuan (tanggal, no_surat, dari, instruksi, status, file_url)
-            VALUES (:tanggal, :no_surat, :dari, '', 'Belum Diproses', :file_url)");
+        $stmt = $pdo->prepare("
+            INSERT INTO surat_disposisi_pengajuan (tanggal, no_surat, dari, arahan, status, file_url)
+            VALUES (:tanggal, :no_surat, :dari, '', 'Belum Diproses', :file_url)
+        ");
         $stmt->execute([
-            'tanggal' => $data['tanggal'],
-            'no_surat' => $data['no_surat'],
-            'dari' => $data['dari'],
-            'file_url' => $data['file_url']
+            'tanggal'   => $data['tanggal'],
+            'no_surat'  => $data['no_surat'],
+            'dari'      => $data['dari'],
+            'file_url'  => $data['file_url']
         ]);
 
         $_SESSION['buka_disposisi_pengajuan'] = true;
@@ -200,8 +251,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cari_surat'])) {
 // Ambil data untuk ditampilkan
 $stmt = $pdo->query("SELECT * FROM surat_disposisi_pengajuan ORDER BY id DESC");
 $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -533,14 +584,14 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
       margin-bottom: 10px;
   }
 
-  .form-group input[type="date"] {
+  /* .form-group input[type="date"] {
     width: 10%;
     padding: 10px;
     border: 1px solid #ccc;
     border-radius: 5px;
     font-size: 16px;
     height: 10px;
-  }
+  } */
   .no-export {
   display: block; /* Tetap tampil di halaman */
   }
@@ -578,12 +629,57 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
   background-color: #f0f0f0;
 }
 
-.dropdown-instruksi {
+.dropdown-arahan {
     width: 19px;
     padding: 5px;
 }
+
+.export-dropdown { position: relative; display: inline-block; }
+.export-toggle { cursor: pointer; }
+.export-menu {
+  position: absolute; top: 100%; left: 0;
+  display: none; min-width: 210px; padding: 6px;
+  background:#fff; border:1px solid #ddd; border-radius:8px;
+  box-shadow:0 6px 20px rgba(0,0,0,.08); z-index: 10;
+}
+.export-item {
+  display:block; width:100%; text-align:left;
+  padding:8px 10px; background:transparent; border:none; cursor:pointer;
+}
+.export-item:hover { background:#f2f6ff; }
+.export-dropdown.open .export-menu { display:block; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
+/* tombol chat di kolom Pesan */
+.btn-chat{ background:#eef4ff; border:1px solid #cfe0ff; padding:6px 10px; border-radius:6px; cursor:pointer; }
+.chat-container{ display:flex; flex-direction:column; gap:10px; padding:10px; }
+.chat-bubble{ max-width:60%; padding:10px 14px; border-radius:14px; margin-bottom:8px; }
+.chat-bubble.left{ background:#f3f4f6; border-top-left-radius:4px; }
+.chat-bubble.right{ background:#dbeafe; border-top-right-radius:4px; margin-left:auto; }
+.chat-time{ font-size:.75em; color:#6b7280; margin-top:4px; text-align:right; }
+
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -600,12 +696,21 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -657,12 +762,18 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
   </nav>
 
-  <h2>Disposisi Pengajuan</h2>
-    <!-- Balok 2: Tombol tambah disposisi -->
+  <h2 class="judul-surat-luar">Disposisi Pengajuan</h2>
+  <div class="kontainer-balok">
   <div class="balok-1">
-      <!-- <a href="form_disposisi.php" class="btn-tambah">Upload</a> -->
-      <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
+    <div class="export-dropdown">
+      <button type="button" class="btn-tambah export-toggle">Export ▾</button>
+      <div class="export-menu">
+        <button type="button" class="export-item" onclick="exportTableToExcel(false)">Export All</button>
+        <button type="button" class="export-item" onclick="exportTableToExcel(true)">Export 3 Bulan Terakhir</button>
+      </div>
+    </div>
   </div>
+
 
   <!-- Balok 2: Search Bar -->
   <div class="balok-2">
@@ -683,59 +794,73 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <th>
                   Instruksi
                   <div class="no-export">
-                      <select onchange="filterTable('instruksi', this.value); showResetButton();">
+                      <select onchange="filterTable('arahan', this.value); showResetButton();">
                           <option value=""></option>
-                          <option value="Diterima">Diterima</option>
-                          <option value="Ditolak">Ditolak</option>
+                          <option value="Disetujui">Disetujui</option>
+                          <option value="Batal">Batal</option>
                       </select>
                   </div>
               </th>
               <th>Status</th>
               <th>File</th>
+              <th>Pesan</th>
               <th>Aksi</th>
           </tr>
       </thead>
       <tbody>
           <?php if (count($surat_pengajuan) === 0): ?>
-              <tr><td colspan="7" align="center">Tidak ada data pengajuan masuk.</td></tr>
+              <tr><td colspan="8" align="center">Tidak ada data pengajuan masuk.</td></tr>
           <?php else: ?>
-              <?php foreach ($surat_pengajuan as $i => $row): ?>
-              <tr>
-                  <td><?= $i + 1 ?></td>
-                  <td><?= htmlspecialchars($row['no_surat']) ?></td>
-                  <td><?= htmlspecialchars($row['tanggal']) ?></td>
-                  <td><?= htmlspecialchars($row['dari']) ?></td>
-                  <td>
-                      <span id="label-instruksi-<?= $row['id'] ?>">
-                          <?= htmlspecialchars($row['instruksi']) ?>
-                      </span>
-                      <select class="dropdown-instruksi" onchange="updateInstruksi(<?= $row['id'] ?>, this.value)">
-                      <option value="">Belum Diproses</option>
-                      <option value="Diterima" <?= $row['instruksi'] == 'Diterima' ? 'selected' : '' ?>>Diterima</option>
-                      <option value="Ditolak" <?= $row['instruksi'] == 'Ditolak' ? 'selected' : '' ?>>Ditolak</option>
-                      </select>
-                  </td>
-                  <td id="status-<?= $row['id'] ?>"><?= htmlspecialchars($row['status']) ?></td>
-                  <td>
-                      <?php if (!empty($row['file_url'])): ?>
-                        <a href="<?= $row['file_url'] ?>" target="_blank"><?= basename($row['file_url']) ?></a>
-                      <?php else: ?>
-                          (Kosong)
-                      <?php endif; ?>
-                  </td>
-                  <td>
-                      <a href="update_surat_disposisi_pengajuan.php?id=<?= $row['id'] ?>">✏️</a><br>
-                      <a href="surat_disposisi_pengajuan.php?delete=<?= $row['id'] ?>" onclick="return confirm('Hapus disposisi ini?')">🗑️</a>
-                  </td>                  
-              </tr>
-              <?php endforeach; ?>
+          <?php foreach ($surat_pengajuan as $i => $row): ?>
+          <tr class="data-row"
+              data-tanggal="<?= htmlspecialchars($row['tanggal']) ?>"
+              data-arahan="<?= htmlspecialchars($row['arahan']) ?>">
+              <!-- data-no_surat="<?= htmlspecialchars($row['no_surat']) ?>"> -->
+              <td><?= $i + 1 ?></td>
+              <td><?= htmlspecialchars($row['no_surat']) ?></td>
+              <td><?= htmlspecialchars($row['tanggal']) ?></td>
+              <td><?= htmlspecialchars($row['dari']) ?></td>
+              <td>
+                <span id="label-arahan-<?= $row['id'] ?>">
+                  <?= htmlspecialchars($row['arahan']) ?>
+                </span>
+                <select class="dropdown-arahan" onchange="updateArahan(<?= $row['id'] ?>, this.value)">
+                  <option value="">Belum Diproses</option>
+                  <option value="Disetujui" <?= $row['arahan'] == 'Disetujui' ? 'selected' : '' ?>>Disetujui</option>
+                  <option value="Batal"  <?= $row['arahan'] == 'Batal'  ? 'selected' : '' ?>>Batal</option>
+                </select>
+              </td>
+              <td id="status-<?= $row['id'] ?>"><?= htmlspecialchars($row['status']) ?></td>
+              <td>
+                <?php if (!empty($row['file_url'])): ?>
+                  <a href="<?= $row['file_url'] ?>" target="_blank"><?= basename($row['file_url']) ?></a>
+                <?php else: ?>(Kosong)<?php endif; ?>
+              </td>
+              <td>
+                <?php if (!empty($row['arahan'])): ?>
+                  <a class="btn-chat"
+                    href="pesan_lihat_1.php?no_surat=<?= urlencode($row['no_surat']) ?>"
+                    title="Buka halaman pesan untuk <?= htmlspecialchars($row['no_surat']) ?>">
+                    💬
+                  </a>
+                <?php else: ?>
+                  <button class="btn-chat" disabled title="Isi instruksi dulu">💬</button>
+                <?php endif; ?>
+              </td>
+              <td>
+                <a href="update_surat_disposisi_pengajuan.php?id=<?= $row['id'] ?>">✏️</a><br>
+                <a href="surat_disposisi_pengajuan.php?delete=<?= $row['id'] ?>" onclick="return confirm('Hapus disposisi ini?')">🗑️</a>
+              </td>
+          </tr>
+          <?php endforeach; ?>
           <?php endif; ?>
       </tbody>
-  </table>
-  </div>
+    </table>
+    </div>
 
-  <div id="reset-container" style="display: none; text-align: right; margin-top: 15px;">
-      <button onclick="resetFilters()" style="background-color:#dc3545; color:white; padding: 8px 16px; border:none; border-radius:5px;">Reset</button>
+    <div id="reset-container" style="display: none; text-align: right; margin-top: 15px;">
+        <button onclick="resetFilters()" style="background-color:#dc3545; color:white; padding: 8px 16px; border:none; border-radius:5px;">Reset</button>
+    </div>
   </div>
 
   <!-- Footer -->
@@ -775,7 +900,7 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>
@@ -796,7 +921,6 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
   });
 
   </script>
-  <script src="script.js"></script>
   <script>
   function filterTable(attribute, value) {
   const rows = document.querySelectorAll('.data-row');
@@ -808,89 +932,80 @@ $surat_pengajuan = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
   });
   }
-function exportTableToExcel() {
-  if (typeof XLSX === 'undefined') {
-    alert('Library XLSX belum dimuat. Pastikan xlsx.full.min.js sudah di-include.');
-    return;
+
+window.exportTableToExcel = function (last3Months) {
+  if (typeof XLSX === 'undefined') { alert('Library XLSX belum dimuat.'); return; }
+  const src = document.getElementById('tabelSuratDisposisiPengajuan');
+  if (!src) { alert('Tabel tidak ditemukan'); return; }
+
+  // clone tabel agar aman dimodifikasi
+  const table = src.cloneNode(true);
+
+  // hapus elemen interaktif/yang tidak diekspor
+  table.querySelectorAll('.no-export, select, form, button').forEach(el => el.remove());
+
+  // --- nama atribut tanggal yang dipakai untuk filter 3 bulan ---
+  const dateAttr = 'tanggal';
+
+  // parser tanggal fleksibel (YYYY-MM-DD atau DD-MM-YYYY)
+  function parseFlexibleDate(str){
+    if (!str) return null;
+    str = String(str).trim();
+    if (str.length >= 10) str = str.slice(0,10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [y,m,d] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+      const [d,m,y] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    return null;
   }
 
-  const table = document.getElementById('tabelSuratDisposisiPengajuan');
-  if (!table) { alert('Tabel tidak ditemukan.'); return; }
+  if (last3Months) {
+    // Rolling 90 hari ke belakang
+    const today = new Date();
+    const end   = new Date(today.getFullYear(), today.getMonth()+1, 0); // akhir bulan ini
+    const start = new Date(today.getFullYear(), today.getMonth()-2, 1); // awal 2 bulan lalu
 
-  // --- Kumpulkan index kolom yang perlu dibuang (File, Aksi) ---
-  const headerRow = table.querySelector('thead tr');
-  if (!headerRow) { alert('Header tabel tidak ditemukan.'); return; }
-  const ths = Array.from(headerRow.querySelectorAll('th'));
 
-  const removeIdx = [];
-  const headers = [];
-
-  ths.forEach((th, idx) => {
-    const label = (th.childNodes[0]?.textContent || th.textContent || '').trim();
-    if (label === 'File' || label === 'Aksi') {
-      removeIdx.push(idx);
-    } else {
-      headers.push(label);
-    }
-  });
-
-  // --- Ambil data baris yang terlihat saja ---
-  const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
-  const data = [];
-
-  bodyRows.forEach(tr => {
-    // Hanya ekspor yang terlihat (display != none)
-    const isHidden = window.getComputedStyle(tr).display === 'none';
-    if (isHidden) return;
-
-    const tds = Array.from(tr.querySelectorAll('td'));
-    if (!tds.length) return;
-
-    const row = [];
-
-    tds.forEach((td, idx) => {
-      if (removeIdx.includes(idx)) return;
-
-      // Khusus kolom Instruksi: ambil dari span label jika ada
-      const spanLabel = td.querySelector('[id^="label-instruksi-"]');
-      let text;
-      if (spanLabel) {
-        text = spanLabel.textContent.trim();
-      } else {
-        // fallback umum: ambil textContent cell (tanpa newline berlebih)
-        text = (td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
-      }
-      row.push(text);
+    // filter berdasarkan data-tanggal pada TR
+    table.querySelectorAll('tbody tr').forEach(tr => {
+      const raw = tr.getAttribute('data-' + dateAttr) || '';
+      const dt  = parseFlexibleDate(raw);
+      if (!dt || dt < start || dt > end) tr.remove();
     });
+  }
 
-    // Hindari push baris kosong
-    if (row.some(v => v !== '')) data.push(row);
+  // Temukan index kolom File & Aksi untuk dibuang di export
+  const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+  const ths = Array.from(headerRow.children);
+  const removeIdx = ths
+    .map((th, i) => [ (th.textContent||'').trim().split('\n')[0], i ])
+    .filter(([t]) => t === 'File' || t === 'Aksi')
+    .map(([, i]) => i);
+
+  // Hapus kolom tersebut dari semua baris
+  table.querySelectorAll('tr').forEach(tr => {
+    Array.from(tr.children).forEach((td, i) => { if (removeIdx.includes(i)) td.remove(); });
   });
 
-  // Gabungkan header + data
-  const aoa = [headers, ...data];
+  // Buat workbook dari tabel
+  const wb = XLSX.utils.table_to_book(table, { sheet: 'Disposisi Pengajuan' });
+  const ws = wb.Sheets['Disposisi Pengajuan'];
 
-  // Buat sheet
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Lebar kolom otomatis (berdasar header)
+  const firstRow = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] || [];
+  ws['!cols'] = firstRow.map(h => ({ wch: Math.min(Math.max(String(h||'').length + 2, 12), 40) }));
 
-  // Lebar kolom dinamis (perkiraan berdasarkan panjang header)
-  ws['!cols'] = [
-    { wch: 6 },   // No
-    { wch: 20 },  // No. Surat
-    { wch: 14 },  // Tanggal
-    { wch: 28 },  // Dari
-    { wch: 20 },  // Instruksi
-    { wch: 20 },  // Status
-  ];
+  // Nama file
+  XLSX.writeFile(wb, `surat_disposisi_pengajuan_${last3Months ? '3bulan' : 'all'}.xlsx`);
 
-  // Buat workbook & tulis file
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'surat disposisi pengajuan');
-  XLSX.writeFile(wb, 'surat_disposisi_pengajuan.xlsx');
-
-  alert('Data berhasil diekspor!');
-}
-
+  document.querySelector('.export-dropdown')?.classList.remove('open');
+};
 
 
     function resetFilters() {
@@ -940,28 +1055,26 @@ function exportTableToExcel() {
   }
 }
 
-function updateInstruksi(id, instruksi) {
+function updateArahan(id, arahan) {
   fetch('surat_disposisi_pengajuan.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'id=' + encodeURIComponent(id) + '&instruksi=' + encodeURIComponent(instruksi)
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'id=' + encodeURIComponent(id) + '&arahan=' + encodeURIComponent(arahan)
   })
   .then(r => r.text())
   .then(t => {
-      t = t.trim(); // penting!
-      if (t === 'success') {
-          const label = document.getElementById('label-instruksi-' + id);
-          if (label) label.innerText = instruksi || 'Belum Diproses';
-
-          const st = document.getElementById('status-' + id);
-          if (st) st.innerText = instruksi ? 'Telah Diproses' : 'Belum Diproses';
-      } else {
-          alert('Gagal memperbarui data: ' + t);
-      }
+    t = t.trim();
+    if (t === 'success') {
+      const label = document.getElementById('label-arahan-'+id);
+      if (label) label.innerText = arahan || 'Belum Diproses';
+      const st = document.getElementById('status-'+id);
+      if (st) st.innerText = arahan ? 'Telah Diproses' : 'Belum Diproses';
+    } else {
+      alert('Gagal memperbarui: ' + t);
+    }
   })
   .catch(err => alert('Error jaringan: ' + err.message));
 }
-
-  </script>  
+  </script>
 </body>
 </html>

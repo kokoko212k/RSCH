@@ -17,7 +17,7 @@ $user_unit    = trim((string)($user['unit'] ?? ''));
 
 // dipakai navbar
 $role = $user_status;
-$can_access_eoffice = in_array($role, ['Super Admin']);
+$can_access_eoffice = in_array($role, ['Super Admin', 'Direktur', 'Sekretariat', 'Admin', 'Member']);
 
 // role yang boleh lihat lintas unit untuk semua thread
 $roles_full_access = ['Super Admin', 'Direktur', 'Sekretariat', 'Admin', 'Member'];
@@ -505,6 +505,9 @@ if ($isAjax) {
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -533,7 +536,7 @@ if ($isAjax) {
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="bacaan.php" class="fitur-nav">Bacaan</a></li>
         <?php endif; ?>
-        <li><a href="masukan.php" class="fitur-nav">Masukan</a></li>
+        <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
         <li class="dropdown">
           <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
@@ -577,7 +580,7 @@ if ($isAjax) {
   <div class="kontainer-balok">
     <div class="wrap">
       <div class="head">
-        <a href="surat_disposisi_tindak_lanjut.php">← Kembali</a>
+        <a id="btnBack" role="button" tabindex="0">← Kembali</a>
         <h2 style="margin:0">Chat: <?= htmlspecialchars($no_surat, ENT_QUOTES) ?></h2>
       </div>
 
@@ -636,7 +639,7 @@ if ($isAjax) {
     </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>
@@ -677,25 +680,39 @@ if ($isAjax) {
   setInterval(loadChat, 10000);
   loadChat();
 
-  function updateToVisibility() {
-    const type = document.querySelector('input[name="to_type"]:checked')?.value || 'status';
-    const elStatus = document.getElementById('toStatus');
-    const elNama   = document.getElementById('toNama');
-    if (type === 'status') {
-      elStatus.style.display = '';
-      elNama.style.display   = 'none';
-    } else {
-      elStatus.style.display = 'none';
-      elNama.style.display   = '';
-    }
-  }
-  document.querySelectorAll('input[name="to_type"]').forEach(r => {
-    r.addEventListener('change', updateToVisibility);
-  });
-  // Prefill: jika ada $pref_status, default tetap "status"
-  updateToVisibility();
+  // function updateToVisibility() {
+  //   const type = document.querySelector('input[name="to_type"]:checked')?.value || 'status';
+  //   const elStatus = document.getElementById('toStatus');
+  //   const elNama   = document.getElementById('toNama');
+  //   if (type === 'status') {
+  //     elStatus.style.display = '';
+  //     elNama.style.display   = 'none';
+  //   } else {
+  //     elStatus.style.display = 'none';
+  //     elNama.style.display   = '';
+  //   }
+  // }
+  // document.querySelectorAll('input[name="to_type"]').forEach(r => {
+  //   r.addEventListener('change', updateToVisibility);
+  // });
+  // // Prefill: jika ada $pref_status, default tetap "status"
+  // updateToVisibility();
 
 
   </script>
+<script>
+  const el = document.getElementById('btnBack');
+
+  // Klik mouse
+  el.addEventListener('click', () => history.back());
+
+  // Keyboard: Enter / Space
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      history.back();
+    }
+  });
+</script>
 </body>
 </html>

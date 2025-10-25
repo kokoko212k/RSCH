@@ -77,6 +77,18 @@ $data = $stmt->fetch();
 if (!$data) {
     die("Data buku tidak ditemukan.");
 }
+
+// ...setelah $data dicek ada...
+$user_nik = $user['nik'] ?? null;
+
+$cek = $pdo->prepare("SELECT 1 FROM bacaan WHERE user_nik = :nik AND id_buku = :id LIMIT 1");
+$cek->execute(['nik' => $user_nik, 'id' => $id]);
+$inMyReading = (bool) $cek->fetchColumn();
+
+$fileUrlRaw = $data['file_url'] ?? '';
+$hasFile = !empty($fileUrlRaw) && (filter_var($fileUrlRaw, FILTER_VALIDATE_URL) || file_exists($fileUrlRaw));
+
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
 
 
@@ -234,10 +246,30 @@ if (!$data) {
 .user-menu a:hover {
   background-color: #f0f0f0;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
 
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
-
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -254,12 +286,21 @@ if (!$data) {
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -322,24 +363,30 @@ if (!$data) {
         <p><strong>Penulis:</strong> <?= htmlspecialchars($data['penulis']) ?></p>
         <p><strong>Tahun:</strong> <?= htmlspecialchars($data['tahun']) ?></p>
         <p><strong>Deskripsi:</strong><br><?= nl2br(htmlspecialchars($data['deskripsi'])) ?></p>      
-        <?php if ($can_edit): ?>
-        <div class="action-buttons">
-            <form method="POST" onsubmit="return confirm('Yakin ingin menghapus buku ini?');">
-                <input type="hidden" name="hapus_id" value="<?= htmlspecialchars($data['id_buku']) ?>">
-                <button type="submit" class="btn-hapus">Hapus</button>
+        <?php if ($inMyReading): ?>
+          <div class="action-buttons">
+            <form method="POST" onsubmit="return confirm('Yakin ingin menghapus buku ini dari daftar bacaan Anda?');">
+              <input type="hidden" name="hapus_id" value="<?= htmlspecialchars($data['id_buku']) ?>">
+              <button type="submit" class="btn-hapus">Hapus</button>
             </form>
-        </div>
+          </div>
         <?php endif; ?>
 
-
-        <?php if (!empty($data['file_url']) && file_exists($data['file_url'])): ?>
-            <div style="margin-top: 15px;">
-                <a href="<?= htmlspecialchars($data['file_url']) ?>" class="btn-download" download>📥 Download File</a>
-            </div>
+        <?php if ($hasFile): ?>
+          <div style="margin-top:15px; display:flex; gap:8px; flex-wrap:wrap;">
+            <!-- Lihat (buka tab baru) -->
+            <a href="<?= htmlspecialchars($fileUrlRaw) ?>"
+              class="btn-download"
+              target="_blank"
+              rel="noopener"> Lihat File</a>
+            <!-- <a href="<?= htmlspecialchars($fileUrlRaw) ?>"
+              class="btn-download"
+              download>📥 Download File</a>
+          </div>
         <?php else: ?>
-            <p><em>Tidak ada file untuk diunduh.</em></p>
+          <p><em>Tidak ada file untuk diunduh.</em></p>
         <?php endif; ?>
-        </div>
+        </div> -->
         </section>
 
    <!-- Footer -->
@@ -374,7 +421,7 @@ if (!$data) {
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>

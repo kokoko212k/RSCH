@@ -1,6 +1,13 @@
 <?php
 session_start();
 include 'config.php';
+// CSRF untuk impersonasi
+if (empty($_SESSION['impersonate_csrf'])) {
+  $_SESSION['impersonate_csrf'] = bin2hex(random_bytes(32));
+}
+$impersonateCsrf = $_SESSION['impersonate_csrf'];
+
+
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
@@ -87,10 +94,8 @@ $alamatKtpResult = $pdo->query("SELECT DISTINCT alamat_ktp FROM users WHERE alam
 
 // Query Data Utama
 $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FETCH_ASSOC);
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -281,9 +286,10 @@ $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FE
       margin-bottom: 10px;
   }
 
-  .form-group input[type="date"] {
-  display: block;
-  width: 20px;
+  #tanggalLahir {
+    width: 20px;      /* ubah sesuai maumu */
+    display: inline-block;
+    box-sizing: border-box;
   }
 
   .no-export {
@@ -337,10 +343,67 @@ $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FE
     cursor: pointer;
     margin-left: 650px;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
+/* Kontainer aksi: rapat tapi rapi */
+td.aksi a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;           /* area klik nyaman */
+  height: 34px;
+  margin-right: 6px;     /* jarak antar ikon */
+  border-radius: 6px;
+  text-decoration: none;
+}
+
+td.aksi a.btn-impersonate i{
+  display:inline-block;     /* supaya transform berfungsi */
+  font-size:20px;
+  line-height:1;
+  transform: translateY(5px);  /* naik(+)/turun(+) → ubah 2px sesuai selera */
+}
+
+
+/* Biar ikon edit/hapus sejajar dan konsisten ukurannya */
+td.aksi a.btn-edit,
+td.aksi a.btn-delete {
+  font-size: 18px;       /* emoji/ikon teks */
+  line-height: 1;
+}
+
+/* Warna hover (opsional) */
+/* td.aksi a.btn-impersonate:hover { background: #eaf5ff; }
+td.aksi a.btn-edit:hover        { background: #eefcee; }
+td.aksi a.btn-delete:hover      { background: #ffeeee; } */
+
+/* Jika ingin warna ikon Boxicons berubah saat hover */
+/* td.aksi a.btn-impersonate:hover i { color: #0b71d9; } */
+
   </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -357,12 +420,21 @@ $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FE
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -518,10 +590,16 @@ $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FE
                 <td><?= htmlspecialchars($row['jenis_kelamin']) ?></td>
                 <td class="alamat-ktp"><?= htmlspecialchars($row['alamat_ktp'] ?? '') ?></td>
                 <td>••••••</td>
-                <td>
-                    <a href="update_akun.php?nik=<?= $row['nik'] ?>&from=users.php">✏️</a>
-                    <!-- <a href="profil.php?nik=<?= $row['nik'] ?>">📖</a> -->
-                    <a href="users.php?delete=<?= $row['nik'] ?>" onclick="return confirm('Hapus user ini?')">🗑️</a>
+                <td class="aksi">
+                <?php if ($role === 'Super Admin'): ?>  
+                  <a class="btn-impersonate" href="impersonate.php?nik=<?= urlencode($row['nik']) ?>&csrf=<?= urlencode($impersonateCsrf) ?>"
+                    title="Masuk"
+                    onclick="return confirm('Masuk sebagai <?= htmlspecialchars($row['nama']) ?>?')">
+                    <i class='bx bxs-user'></i>
+                  </a>
+                <?php endif; ?>
+                <a href="update_akun.php?nik=<?= urlencode($row['nik']) ?>&from=users.php" title="Edit">✏️</a>
+                  <a href="users.php?delete=<?= urlencode($row['nik']) ?>" onclick="return confirm('Hapus user ini?')" title="Hapus">🗑️</a>
                 </td>
             </tr>
         <?php endforeach; ?>
@@ -561,7 +639,7 @@ $result = $pdo->query("SELECT * FROM users ORDER BY nik DESC")->fetchAll(PDO::FE
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script>

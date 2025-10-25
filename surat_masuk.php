@@ -7,9 +7,6 @@ function h(?string $s): string {
     return htmlspecialchars($s ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-/* ============================================================
-   1) AJAX: simpan NOTE dari textarea (surat_masuk)
-   ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_note'], $_POST['id'])) {
     header('Content-Type: text/plain; charset=utf-8');   // <-- supaya fetch tidak dapat HTML
 
@@ -81,6 +78,140 @@ if (isset($_GET['delete'])) {
     header("Location: surat_masuk.php");
     exit();
 }
+/* ============================================================
+   3b) INSERT dari surat_disposisi_pengajuan (import)
+   - Trigger via POST: insert_from_disposisi_pengajuan=1 & id=<id_dsp>
+   ============================================================ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && isset($_POST['insert_from_disposisi_pengajuan'], $_POST['id'])) {
+
+    $dspId = (int)$_POST['id'];
+
+    // Ambil baris sumber dari surat_disposisi_pengajuan
+    $q = $pdo->prepare("SELECT * FROM surat_disposisi_pengajuan WHERE id = :id LIMIT 1");
+    $q->execute(['id' => $dspId]);
+    $dsp = $q->fetch(PDO::FETCH_ASSOC);
+
+    if (!$dsp) {
+        $_SESSION['success_message'] = "Data Disposisi Pengajuan tidak ditemukan.";
+        header("Location: surat_masuk.php");
+        exit();
+    }
+
+    // Normalisasi file_url
+    $file_raw  = (string)($dsp['file_url'] ?? '');
+    $file_base = basename($file_raw);
+    $file_store = (strpos($file_raw, 'uploads/') === 0) ? $file_raw : ('uploads/'.$file_base);
+
+    // Fallback ambil informasi tambahan dari surat_pengajuan (jika ada)
+    $src = $pdo->prepare("
+        SELECT *
+          FROM surat_pengajuan
+         WHERE file_url = :file_raw
+            OR file_url = :file_base
+            OR TRIM(no_surat) = TRIM(:no)
+         ORDER BY id DESC
+         LIMIT 1
+    ");
+    $src->execute([
+        'file_raw'  => $file_raw,
+        'file_base' => $file_base,
+        'no'        => $dsp['no_surat'] ?? ''
+    ]);
+    $sp = $src->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    // Siapkan nilai yang akan disimpan
+    $tanggal_surat     = $dsp['tanggal']   ?? $sp['tanggal']   ?? date('Y-m-d');
+    $tanggal_diterima  = date('Y-m-d'); // saat diimport
+    $no_surat          = trim($dsp['no_surat'] ?? $sp['no_surat'] ?? '');
+    $no_agenda         = ''; // tidak ada di sumber → kosongkan
+    $perihal           = trim($sp['perihal'] ?? ''); // ambil dari surat_pengajuan bila ada
+    $dari              = trim($dsp['dari'] ?? $sp['dari'] ?? '');
+    $keterangan        = '';
+    $note              = '';
+    $disposisi_kepada  = '';
+    $instruksi         = ''; // belum ada instruksi di tahap ini
+    $tanggal_disposisi = null;
+    $arahan            = trim($dsp['arahan'] ?? ''); // simpan bila ada (mis. "Disetujui")
+
+    // Cek apakah sudah ada di surat_masuk (hindari duplikat)
+    $cek = $pdo->prepare("
+        SELECT id
+          FROM surat_masuk
+         WHERE file_url = :file_raw
+            OR file_url = :file_base
+            OR TRIM(no_surat) = TRIM(:no)
+         ORDER BY id DESC
+         LIMIT 1
+    ");
+    $cek->execute([
+        'file_raw'  => $file_raw,
+        'file_base' => $file_base,
+        'no'        => $no_surat
+    ]);
+    $existingId = $cek->fetchColumn();
+
+    if ($existingId) {
+        // UPDATE data yang belum terisi (idempotent & aman)
+        $upd = $pdo->prepare("
+            UPDATE surat_masuk
+               SET tanggal_surat     = COALESCE(NULLIF(tanggal_surat,''), :tgl_surat),
+                   tanggal_diterima  = COALESCE(tanggal_diterima, :tgl_diterima),
+                   no_surat          = COALESCE(NULLIF(no_surat,''), :no_surat),
+                   perihal           = COALESCE(NULLIF(perihal,''), :perihal),
+                   dari              = COALESCE(NULLIF(dari,''), :dari),
+                   file_url          = COALESCE(NULLIF(file_url,''), :file_url),
+                   arahan            = COALESCE(NULLIF(arahan,''), :arahan)
+             WHERE id = :id
+             LIMIT 1
+        ");
+        $upd->execute([
+            'tgl_surat'    => $tanggal_surat,
+            'tgl_diterima' => $tanggal_diterima,
+            'no_surat'     => $no_surat,
+            'perihal'      => $perihal,
+            'dari'         => $dari,
+            'file_url'     => $file_store,
+            'instruksi'    => $instruksi,
+            'arahan'       => $arahan,
+            'id'           => $existingId
+        ]);
+
+        $_SESSION['success_message'] = "Surat diperbarui dari Disposisi Pengajuan (ID #{$dspId}).";
+    } else {
+        // INSERT baru ke surat_masuk
+        $ins = $pdo->prepare("
+            INSERT INTO surat_masuk
+                (tanggal_surat, tanggal_diterima, no_surat, no_agenda,
+                 perihal, dari, keterangan, note, disposisi_kepada, instruksi,
+                 tanggal_disposisi, file_url, arahan)
+            VALUES
+                (:tgl_surat, :tgl_diterima, :no_surat, :no_agenda,
+                 :perihal, :dari, :keterangan, :note, :disposisi_kepada, :instruksi,
+                 :tgl_disposisi, :file_url, :arahan)
+        ");
+        $ins->execute([
+            'tgl_surat'        => $tanggal_surat,
+            'tgl_diterima'     => $tanggal_diterima,
+            'no_surat'         => $no_surat,
+            'no_agenda'        => $no_agenda,
+            'perihal'          => $perihal,
+            'dari'             => $dari,
+            'keterangan'       => $keterangan,
+            'note'             => $note,
+            'disposisi_kepada' => $disposisi_kepada,
+            'instruksi'        => $instruksi,
+            'tgl_disposisi'    => $tanggal_disposisi,
+            'file_url'         => $file_store,
+            'arahan'           => $arahan,
+        ]);
+
+        // $_SESSION['success_message'] = "Surat dimasukkan dari Disposisi Pengajuan (ID #{$dspId}).";
+    }
+
+    header("Location: surat_masuk.php");
+    exit();
+}
 
 /* ============================================================
    4) Simpan surat masuk baru (upload)
@@ -122,22 +253,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
 
         if (in_array($file_type, $allowed_types) && $_FILES['file_url']['size'] <= 5 * 1024 * 1024) {
             if (move_uploaded_file($_FILES['file_url']['tmp_name'], $file_path)) {
-                // INSERT ke surat_masuk
-                $stmt = $pdo->prepare("INSERT INTO surat_masuk 
-                  (tanggal_surat, tanggal_diterima, no_surat, no_agenda, perihal, dari, keterangan, note, disposisi_kepada, file_url) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([
-                  $tanggal_surat,
-                  $tanggal_diterima,
-                  $no_surat,
-                  $no_agenda,
-                  $perihal,
-                  $dari,
-                  $keterangan,
-                  $note,                 // simpan note awal jika ada
-                  $disposisi_kepada,
-                  $file_name
-                ]);
+            $tanggal_disposisi_auto = (strtolower($instruksi) === 'diteruskan langsung') ? date('Y-m-d') : null;
+
+            $stmt = $pdo->prepare("INSERT INTO surat_masuk 
+              (tanggal_surat, tanggal_diterima, no_surat, no_agenda, perihal, dari, keterangan, note, disposisi_kepada, instruksi, tanggal_disposisi, file_url) 
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+              $tanggal_surat,
+              $tanggal_diterima,
+              $no_surat,
+              $no_agenda,
+              $perihal,
+              $dari,
+              $keterangan,
+              $note,
+              $disposisi_kepada,
+              $instruksi,
+              $tanggal_disposisi_auto,
+              $file_name
+            ]);
 
                 // Auto insert ke surat_disposisi
                 $stmt2 = $pdo->prepare("INSERT INTO surat_disposisi 
@@ -186,6 +320,8 @@ $perihalData     = getDropdownData($pdo, 'perihal');
 $dariData        = getDropdownData($pdo, 'dari');
 $keteranganData  = getDropdownData($pdo, 'keterangan');
 $noteData        = getDropdownData($pdo, 'note');
+$instruksiData = getDropdownData($pdo, 'instruksi');
+
 
 /* ============================================================
    6) Update disposisi_kepada + tanggal_disposisi
@@ -206,13 +342,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             'id' => $id
         ]);
 
-        // notif
+        // ambil data utk insert notif + redirect dengan no_surat
         $stmtGet = $pdo->prepare("SELECT no_surat, file_url FROM surat_masuk WHERE id = ?");
         $stmtGet->execute([$id]);
         $row = $stmtGet->fetch(PDO::FETCH_ASSOC);
 
         if ($row) {
-            $stmtNotif = $pdo->prepare("INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu) VALUES (:tanggal, :no_surat, :file_url, NOW())");
+            $stmtNotif = $pdo->prepare("
+                INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu) 
+                VALUES (:tanggal, :no_surat, :file_url, NOW())
+            ");
             $stmtNotif->execute([
                 'tanggal'  => date('Y-m-d'),
                 'no_surat' => $row['no_surat'],
@@ -220,14 +359,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             ]);
         }
 
+        // <-- ARAHKAN KE HALAMAN NOTIF
+        $_SESSION['success_message'] = "Disposisi diperbarui & notifikasi dibuat.";
+        $qs_no = urlencode($row['no_surat'] ?? '');
         header("Location: surat_masuk.php");
         exit();
     }
 }
+
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -457,11 +598,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
 }
 .export-item:hover { background:#f2f6ff; }
 .export-dropdown.open .export-menu { display:block; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
+.btn-chat{
+  background:#eef4ff; border:1px solid #cfe0ff;
+  padding:6px 10px; border-radius:6px; cursor:pointer;
+}
+.btn-chat[disabled]{ opacity:.5; cursor:not-allowed; }
 
   </style>
 <script defer src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -478,12 +646,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -685,8 +862,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             </th>
             <th>
                 <div class="input-row">
-                  <label for="disposisi_kepada">Disposisi Kepada:</label>
-                  <select onchange="applyAllFilters('disposisi_kepada', this.value); showResetButton();">                  
+                  <label for="select-disposisi-kepada">Disposisi Kepada:</label>
+                  <select id="select-disposisi-kepada" onchange="applyAllFilters('disposisi_kepada', this.value); showResetButton();">                  
                     <option value="">---Pilih---</option>
                     <option value="GUDANG FARMASI">GUDANG FARMASI</option>
                     <option value="GUDANG LOGISTIK">GUDANG LOGISTIK</option>
@@ -736,6 +913,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                   </select>
                 </div>
             </th>
+            <th>Pesan</th>
             <th>File</th>
             <th>Aksi</th>
         </tr>
@@ -771,6 +949,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
               <textarea
                 class="note-view"
                 readonly
+                placeholder="..."
                 style="width:220px; min-height:60px; resize:vertical; background:#fff;"
               ><?= h($row['note'] ?? '') ?></textarea>
             </td>
@@ -803,7 +982,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                 </select>
               </form>
             </td>
-            <td><a href="<?= $row['file_url'] ?>" target="_blank"><?= basename($row['file_url']) ?></a></td>
+            <td>
+              <?php if (!empty($row['disposisi_kepada'])): ?>
+                <a class="btn-chat"
+                  href="pesan_lihat_5.php?no_surat=<?= urlencode($row['no_surat']) ?>"
+                  title="Buka halaman pesan untuk <?= htmlspecialchars($row['no_surat']) ?>">
+                  💬
+                </a>
+              <?php else: ?>
+                <button class="btn-chat" disabled title="Isi 'Disposisi Kepada' dulu">💬</button>
+              <?php endif; ?>
+            </td>
+            <td><a href="<?= $row['file_url'] ?>" target="_blank"required><?= basename($row['file_url']) ?></a></td>
             <td>
                 <a href="update_surat_masuk.php?id=<?= $row['id'] ?>">✏️</a><br>
                 <a href="surat_masuk.php?delete=<?= $row['id'] ?>" onclick="return confirm('Hapus surat ini?')">🗑️</a>
@@ -850,25 +1040,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script defer src="script.js"></script>
   <script>
-  // ============ User menu (dibungkus supaya tidak bentrok nama variabel global) ============
-  (function(){
-    const userIconEl = document.querySelector(".user-icon");
-    const userMenuEl = document.getElementById("userMenu");
-    if (userIconEl && userMenuEl) {
-      userIconEl.addEventListener("click", function (e) {
-        e.stopPropagation();
-        userMenuEl.style.display = (userMenuEl.style.display === "block") ? "none" : "block";
-      });
-      document.addEventListener("click", function (e) {
-        if (!userIconEl.contains(e.target)) userMenuEl.style.display = "none";
-      });
+  const userIcon = document.querySelector(".user-icon");
+  const userMenu = document.getElementById("userMenu");
+  if (userIcon) {
+    userIcon.addEventListener("click", function (e) {
+      e.stopPropagation();
+      userMenu.style.display = userMenu.style.display === "block" ? "none" : "block";
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (userMenu && !userIcon.contains(e.target)) {
+      userMenu.style.display = "none";
     }
-  })();
+  });
 
   function showResetButton() {
     const resetContainer = document.getElementById("reset-container");
@@ -931,8 +1121,8 @@ window.exportTableToExcel = function (last3Months) {
   if (last3Months) {
     // --- Mode rolling 90 hari (paling aman & intuitif) ---
     const today = new Date();
-    const start = new Date(today.getTime() - 90*24*60*60*1000);
-    const end   = today;
+    const end   = new Date(today.getFullYear(), today.getMonth()+1, 0); // akhir bulan ini
+    const start = new Date(today.getFullYear(), today.getMonth()-2, 1); // awal 2 bulan lalu
 
     // // --- Kalau mau 3 bulan kalender, pakai ini:
     // const end   = new Date(today.getFullYear(), today.getMonth()+1, 0); // akhir bulan ini
@@ -1006,7 +1196,7 @@ window.exportTableToExcel = function (last3Months) {
       dari: getSelectValue('Dari'),
       keterangan: getSelectValue('Keterangan'),
       note: getSelectValue('Note'),
-      instruksi: getSelectValue('Disposisi'),
+      instruksi: getSelectValue('instruksi'),
       disposisi_kepada: (document.getElementById('select-disposisi-kepada')?.value || '').toLowerCase() // <- pakai id khusus
     };
 
@@ -1075,7 +1265,86 @@ document.addEventListener('DOMContentLoaded', () => {
 //   .catch(err => alert('Gagal menyimpan note: ' + err.message));
 // }
 
+
   </script>
+<script>
+// function loadChat(noSurat, container) {
+//   const url = 'pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat);
+//   if (container) container.innerHTML = '<div style="opacity:.6">Memuat percakapan...</div>';
+
+//   fetch(url, {
+//     credentials: 'same-origin',
+//     headers: { 'X-Requested-With': 'XMLHttpRequest' }
+//   })
+//     .then(res => res.text())
+//     .then(html => {
+//       if (!container) return;
+//       container.innerHTML = html && html.trim()
+//         ? '<div class="chat-container">' + html + '</div>'
+//         : '<div style="opacity:.6">Belum ada pesan.</div>';
+//       container.scrollTop = container.scrollHeight;
+//     })
+//     .catch(err => {
+//       if (container) container.innerHTML = '<div style="color:#b00020">Gagal memuat chat: ' + err.message + '</div>';
+//     });
+// }
+
+// function toggleChatBoxFromBtn(btn) {
+//   const dataRow = btn.closest('tr');
+//   if (!dataRow) return;
+
+//   const chatRow = dataRow.nextElementSibling; // baris chat tepat setelah baris data
+//   if (!chatRow) return;
+
+//   const chatBox = chatRow.querySelector('.chat-box');
+//   const hidden = (chatRow.style.display === 'none' || !chatRow.style.display);
+//   chatRow.style.display = hidden ? 'table-row' : 'none';
+
+//   if (hidden) {
+//     const noSurat = btn.dataset.noSurat || chatRow.dataset.noSurat || dataRow.dataset.noSurat;
+//     if (noSurat && chatBox) loadChat(noSurat, chatBox);
+//   }
+// }
+
+// submit form chat (AJAX)
+// document.addEventListener('DOMContentLoaded', () => {
+//   document.querySelectorAll('.form-chat').forEach(form => {
+//     form.addEventListener('submit', function(e) {
+//       e.preventDefault();
+//       const fd = new FormData(form);
+//       const noSurat = form.dataset.noSurat;
+//       const chatBox = form.closest('tr').querySelector('.chat-box');
+
+//       fetch('pesan_buat.php', { method: 'POST', body: fd })
+//         .then(res => res.text())
+//         .then(() => {
+//           form.reset();
+//           loadChat(noSurat, chatBox);
+//         })
+//         .catch(err => alert('Gagal kirim: ' + err.message));
+//     });
+//   });
+
+//   // auto-refresh chat yang sedang terbuka tiap 10 detik
+//   setInterval(() => {
+//     document.querySelectorAll('tr[id^="chatbox-"]').forEach(chatRow => {
+//       if (chatRow.style.display === 'none') return;
+//       const noSurat = chatRow.dataset.noSurat;
+//       const chatBox = chatRow.querySelector('.chat-box');
+//       if (noSurat && chatBox) {
+//         fetch('pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat))
+//           .then(r => r.text())
+//           .then(html => {
+//             chatBox.innerHTML = html && html.trim()
+//               ? '<div class="chat-container">' + html + '</div>'
+//               : '<div style="opacity:.6">Belum ada pesan.</div>';
+//             chatBox.scrollTop = chatBox.scrollHeight;
+//           });
+//       }
+//     });
+//   }, 10000);
+// });
+</script>
 </body>
 </html>
 

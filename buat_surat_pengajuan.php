@@ -1,18 +1,207 @@
 <?php
 session_start();
-include 'config.php';
-
-if (isset($_GET['success']) && $_GET['success'] == 1) {
-    echo "<script>alert('Data berhasil disimpan!');</script>";
-}
+include 'config.php'; // harus menyediakan $pdo (PDO) & koneksi DB
 
 if (!isset($_SESSION['user'])) {
     header('Location: login.php');
     exit();
 }
 
-$user = $_SESSION['user'] ?? null;
-$role = $user['status'] ?? null;
+$user   = $_SESSION['user'];
+$role   = $user['status'] ?? null;
+$nik    = $user['nik']    ?? null;
+$nama   = $user['nama']   ?? null;
+$unit   = $user['unit']   ?? null;
+$status = $user['status'] ?? null;
+
+/* ========= util: hitung badge notif per-user (unread) ========= */
+$loginUserId = (int)($user['id'] ?? 0);
+$jumlahNotif = 0;
+if ($loginUserId > 0) {
+  $stmtCnt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM notifikasi_targets t
+    LEFT JOIN detail_notifikasi d
+      ON d.notifikasi_id = t.notifikasi_id
+     AND d.user_id       = t.user_id
+    WHERE t.user_id = ?
+      AND (d.read_at IS NULL)
+  ");
+  $stmtCnt->execute([$loginUserId]);
+  $jumlahNotif = (int)$stmtCnt->fetchColumn();
+}
+
+/* ========= Notifier: kirim ke SuperAdmin, Sekretariat(unit), dan owner =========
+   Pastikan di DB:
+   - notifikasi.event_key UNIQUE
+   - tabel notifikasi_targets(user_id, notifikasi_id) & detail_notifikasi(read_at)
+*/
+function buat_notif_dari_surat_pengajuan(PDO $pdo, int $suratId, string $aksi, ?string $ownerNik, ?string $ownerUnit): void {
+    $eventKey = "surat_pengajuan:{$aksi}:{$suratId}";
+    $title    = $aksi === 'create' ? 'Pengajuan baru dibuat' : 'Pengajuan diperbarui';
+    $body     = "ID Pengajuan: {$suratId}";
+    $action   = "surat_pengajuan.php?open={$suratId}";
+
+    // 1) notifikasi (upsert by event_key)
+    $ins = $pdo->prepare("
+      INSERT INTO notifikasi (title, body, action_url, type, event_key, created_by)
+      VALUES (:t, :b, :u, 'surat_pengajuan', :ek, NULL)
+      ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)
+    ");
+    $ins->execute([':t'=>$title, ':b'=>$body, ':u'=>$action, ':ek'=>$eventKey]);
+    $notifId = (int)$pdo->lastInsertId();
+    if ($notifId <= 0) return;
+
+    // 2) target penerima
+    $userIds = [];
+
+    // Super Admin
+    $st = $pdo->query("SELECT id FROM users WHERE status='Super Admin'");
+    $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+
+    // Sekretariat (per unit) — kalau diketahui
+    if ($ownerUnit) {
+        $st = $pdo->prepare("SELECT id FROM users WHERE status='Sekretariat' AND unit=?");
+        $st->execute([$ownerUnit]);
+        $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    // Pemilik (owner NIK) — kalau diketahui
+    if ($ownerNik) {
+        $st = $pdo->prepare("SELECT id FROM users WHERE nik=?");
+        $st->execute([$ownerNik]);
+        $userIds = array_merge($userIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    $userIds = array_values(array_unique(array_filter($userIds, fn($v)=>$v>0)));
+    if (!$userIds) return;
+
+    // 3) simpan target + tandai unread
+    $insT = $pdo->prepare("
+      INSERT IGNORE INTO notifikasi_targets (notifikasi_id, user_id, status, unit)
+      VALUES (?, ?, NULL, ?)
+    ");
+    foreach ($userIds as $uid) {
+        $insT->execute([$notifId, $uid, ($ownerUnit ?: null)]);
+        $pdo->prepare("
+          INSERT IGNORE INTO detail_notifikasi (notifikasi_id, user_id, read_at)
+          VALUES (?, ?, NULL)
+        ")->execute([$notifId, $uid]);
+    }
+}
+
+/* ========= HAPUS: batasi sesuai role =========
+   - Super Admin: bebas
+   - Sekretariat: hanya yang pengajuan_unit = unit-nya
+   - Lainnya: hanya miliknya (pengajuan_nik = nik)
+*/
+if (isset($_GET['delete'])) {
+    $id = (int)($_GET['delete'] ?? 0);
+    if ($id > 0) {
+        if ($role === 'Super Admin') {
+            $pdo->prepare("DELETE FROM surat_pengajuan WHERE id=?")->execute([$id]);
+        } elseif ($role === 'Sekretariat') {
+            $pdo->prepare("
+              DELETE FROM surat_pengajuan
+              WHERE id=? AND pengajuan_unit=?
+            ")->execute([$id, $unit]);
+        } else {
+            $pdo->prepare("
+              DELETE FROM surat_pengajuan
+              WHERE id=? AND pengajuan_nik=?
+            ")->execute([$id, $nik]);
+        }
+    }
+    header("Location: surat_pengajuan.php");
+    exit();
+}
+
+/* ========= Dropdown (opsional, kalau dipakai di form/list) ========= */
+$noSuratResult = $pdo->query("SELECT DISTINCT no_surat FROM surat_pengajuan ORDER BY no_surat");
+$dariResult    = $pdo->query("SELECT DISTINCT dari FROM surat_pengajuan ORDER BY dari");
+
+/* ========= CREATE: simpan + kirim notifikasi ========= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $tanggal  = trim($_POST['tanggal']   ?? '');
+    $no_surat = trim($_POST['no_surat']  ?? '');
+    $dari     = trim($_POST['dari']      ?? '');
+
+    // folder file
+    $target_dir = "pengajuan/files/";
+    if (!is_dir($target_dir)) mkdir($target_dir, 0755, true);
+
+    $allowed_types = ['application/pdf'];
+    $file_path_to_save = '';
+
+    if (isset($_FILES['file_url']) && $_FILES['file_url']['error'] === UPLOAD_ERR_OK) {
+        $file_name = basename($_FILES['file_url']['name']);
+        $file_tmp  = $_FILES['file_url']['tmp_name'];
+        $file_type = $_FILES['file_url']['type'];
+        $file_size = $_FILES['file_url']['size'];
+        $file_path = $target_dir . $file_name;
+
+        if (!in_array($file_type, $allowed_types, true)) {
+            die("File harus PDF.");
+        }
+        if ($file_size > 5 * 1024 * 1024) {
+            die("Maksimal ukuran file 5MB.");
+        }
+        if (!move_uploaded_file($file_tmp, $file_path)) {
+            die("Gagal mengunggah file.");
+        }
+        $file_path_to_save = $file_path;
+    } else {
+        die("File wajib diunggah.");
+    }
+
+    // simpan ke DB (lengkap dengan pemilik)
+    $stmt = $pdo->prepare("
+      INSERT INTO surat_pengajuan
+        (tanggal, no_surat, dari, file_url,
+         pengajuan_nik, pengajuan_nama, pengajuan_unit, pengajuan_status)
+      VALUES
+        (:tanggal, :no_surat, :dari, :file_url,
+         :nik, :nama, :unit, :status)
+    ");
+    $stmt->execute([
+      ':tanggal' => $tanggal,
+      ':no_surat'=> $no_surat,
+      ':dari'    => $dari,
+      ':file_url'=> $file_path_to_save,
+      ':nik'     => $nik,
+      ':nama'    => $nama,
+      ':unit'    => $unit,
+      ':status'  => $status,
+    ]);
+
+    $last_id = (int)$pdo->lastInsertId();
+
+    // otomatis tambahkan ke tabel tindak lanjut pengajuan (kalau memang alurnya begitu)
+    $stmt3 = $pdo->prepare("
+      INSERT INTO surat_disposisi_pengajuan
+        (tanggal, no_surat, dari, arahan, status, file_url)
+      VALUES
+        (:tanggal, :no_surat, :dari, '', 'Belum Diproses', :file_url)
+    ");
+    $stmt3->execute([
+      ':tanggal'  => $tanggal,
+      ':no_surat' => $no_surat,
+      ':dari'     => $dari,
+      ':file_url' => $file_path_to_save,
+    ]);
+
+    // === TRIGGER NOTIFIKASI SETELAH CREATE ===
+    if ($last_id > 0) {
+        buat_notif_dari_surat_pengajuan($pdo, $last_id, 'create', $nik, $unit);
+    }
+
+    header('Location: surat_pengajuan.php?success=1');
+    exit();
+}
+
+/* ========= (opsional) Ambil list kalau page ini sekalian menampilkan tabel ========= */
+$result = $pdo->query("SELECT * FROM surat_pengajuan ORDER BY id DESC");
+
 $eofficeAll = [
   'surat_masuk.php'                   => 'Surat Masuk',
   'surat_keluar.php'                  => 'Surat Keluar',
@@ -47,90 +236,7 @@ $rolePages = [
 // Tentukan halaman yang boleh tampil untuk role saat ini
 $allowedEofficePages = $rolePages[$role] ?? [];
 $can_access_eoffice  = !empty($allowedEofficePages);
-// Hapus Data
-if (isset($_GET['delete'])) {
-    $id = $_GET['delete'];
-    $stmt = $pdo->prepare("DELETE FROM surat_pengajuan WHERE id = :id");
-    $stmt->execute(['id' => $id]);
-    header("Location: surat_pengajuan.php");
-    exit();
-}
-
-// Ambil data unik untuk dropdown
-$noSuratResult = $pdo->query("SELECT DISTINCT no_surat FROM surat_pengajuan");
-$dariResult = $pdo->query("SELECT DISTINCT dari FROM surat_pengajuan");
-
-$result = $pdo->query("SELECT * FROM surat_pengajuan ORDER BY id DESC");
-
-// Proses input data
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $tanggal = $_POST['tanggal'] ?? '';
-    $no_surat = $_POST['no_surat'] ?? '';
-    $dari = $_POST['dari'] ?? '';
-
-    $target_dir = "pengajuan/files/";
-    if (!file_exists($target_dir)) mkdir($target_dir, 0755, true);
-
-    $allowed_types = ['application/pdf'];
-
-    $file_path_to_save = '';
-    if (isset($_FILES["file_url"]) && $_FILES["file_url"]["error"] === UPLOAD_ERR_OK) {
-        $file_name = basename($_FILES["file_url"]["name"]);
-        $file_tmp = $_FILES["file_url"]["tmp_name"];
-        $file_type = $_FILES["file_url"]["type"];
-        $file_size = $_FILES["file_url"]["size"];
-        $file_path = $target_dir . $file_name;
-
-        if (in_array($file_type, $allowed_types) && $file_size <= 5 * 1024 * 1024) {
-            if (move_uploaded_file($file_tmp, $file_path)) {
-                $file_path_to_save = $file_path;
-
-                // Masukkan ke surat_pengajuan
-                $stmt = $pdo->prepare("INSERT INTO surat_pengajuan (tanggal, no_surat, dari, file_url) VALUES (:tanggal, :no_surat, :dari, :file_url)");
-                $stmt->execute([
-                    'tanggal' => $tanggal,
-                    'no_surat' => $no_surat,
-                    'dari' => $dari,
-                    'file_url' => $file_path_to_save
-                ]);
-
-                $last_id = $pdo->lastInsertId();
-
-                // Ambil data terakhir
-                $stmt2 = $pdo->prepare("SELECT * FROM surat_pengajuan WHERE id = :id");
-                $stmt2->execute(['id' => $last_id]);
-                $data = $stmt2->fetch();
-
-                if ($data) {
-                    $tanggal = $data['tanggal'];
-                    $no_surat = $data['no_surat'];
-                    $dari = $data['dari'];
-                    $file_url = $data['file_url'];
-
-                    $stmt3 = $pdo->prepare("INSERT INTO surat_disposisi_pengajuan (tanggal, no_surat, dari, instruksi, status, file_url) 
-                        VALUES (:tanggal, :no_surat, :dari, '', 'Belum Diproses', :file_url)");
-                    $stmt3->execute([
-                        'tanggal' => $tanggal,
-                        'no_surat' => $no_surat,
-                        'dari' => $dari,
-                        'file_url' => $file_url
-                    ]);
-                }
-
-                header('Location: surat_pengajuan.php?success=1');
-                exit();
-            } else {
-                echo "Gagal mengunggah file.";
-            }
-        } else {
-            echo "File harus PDF dan maksimal 5MB.";
-        }
-    }
-}
 ?>
-
-
-
 
 <!DOCTYPE html>
 <html lang="id">
@@ -268,8 +374,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 .user-menu a:hover {
   background-color: #f0f0f0;
 }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -286,12 +414,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -446,7 +583,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
 

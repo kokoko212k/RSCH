@@ -80,6 +80,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['update_disposisi']) 
         header('Location: surat_disposisi_tindak_lanjut.php'); exit;
     }
 }
+// ================== UPDATE NOTE VIA AJAX ==================
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && (isset($_POST['save_note_tl']))
+    && isset($_POST['id_tindaklanjut'])) {
+
+    // Supaya respon bukan HTML penuh
+    header('Content-Type: text/plain; charset=utf-8');
+
+    $id_tl = (int)($_POST['id_tindaklanjut'] ?? 0);
+    $note  = trim(substr($_POST['note'] ?? '', 0, 255));
+
+    if ($id_tl <= 0) {
+        echo 'invalid';
+        exit;
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        // ambil no_surat untuk sync massal
+        $q = $pdo->prepare("
+            SELECT no_surat
+            FROM surat_disposisi_tindak_lanjut
+            WHERE id_tindaklanjut = ?
+            LIMIT 1
+        ");
+        $q->execute([$id_tl]);
+        $rowNS = $q->fetch(PDO::FETCH_ASSOC);
+        $noSuratSync = $rowNS['no_surat'] ?? null;
+
+        // update note baris ini
+        $u = $pdo->prepare("
+            UPDATE surat_disposisi_tindak_lanjut
+               SET note = ?
+             WHERE id_tindaklanjut = ?
+        ");
+        $u->execute([$note, $id_tl]);
+
+        $pdo->commit();
+        echo 'ok';
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        echo 'error: '.$e->getMessage();
+    }
+
+    exit; // WAJIB stop supaya gak kirim HTML halaman penuh
+}
+
 
 if (isset($_GET['delete'])) {
     $id = (int)$_GET['delete'];
@@ -132,10 +180,11 @@ $pengirim = $user['nama'] ?? '';
 
 
 // ================== SYNC DATA DARI SURAT_DISPOSISI ==================
+// 1. Ambil kolom note juga
 $stmtDisposisi = $pdo->prepare("
-    SELECT id, tanggal, no_surat, file_url, instruksi 
-    FROM surat_disposisi 
-    WHERE LOWER(instruksi) LIKE '%diteruskan%'
+    SELECT id, tanggal, no_surat, file_url, instruksi, note
+    FROM surat_disposisi
+    WHERE LOWER(instruksi) LIKE 'diteruskan'
 ");
 $stmtDisposisi->execute();
 $dataDisposisi = $stmtDisposisi->fetchAll(PDO::FETCH_ASSOC);
@@ -143,22 +192,42 @@ $dataDisposisi = $stmtDisposisi->fetchAll(PDO::FETCH_ASSOC);
 foreach ($dataDisposisi as $row) {
     $cek = $pdo->prepare("SELECT COUNT(*) FROM surat_disposisi_tindak_lanjut WHERE no_surat = ?");
     $cek->execute([$row['no_surat']]);
+
     if ($cek->fetchColumn() == 0) {
+        // 2. Masukkan note ke tabel tindak lanjut
         $insert = $pdo->prepare("
-            INSERT INTO surat_disposisi_tindak_lanjut (tanggal, no_surat, file_url)
-            VALUES (?, ?, ?)
+            INSERT INTO surat_disposisi_tindak_lanjut (tanggal, no_surat, file_url, note)
+            VALUES (?, ?, ?, ?)
         ");
-        $insert->execute([$row['tanggal'], $row['no_surat'], $row['file_url']]);
+        $insert->execute([
+            $row['tanggal'],
+            $row['no_surat'],
+            $row['file_url'],
+            $row['note'] ?? '' // kalau null, simpan string kosong
+        ]);
     }
 }
 
+
 $noSuratTL = $pdo->query("SELECT DISTINCT no_surat FROM surat_disposisi_tindak_lanjut ORDER BY no_surat ASC")->fetchAll(PDO::FETCH_COLUMN);
 $disposisiTL = $pdo->query("SELECT DISTINCT disposisi_kepada FROM surat_disposisi_tindak_lanjut WHERE disposisi_kepada IS NOT NULL AND disposisi_kepada<>'' ORDER BY disposisi_kepada ASC")->fetchAll(PDO::FETCH_COLUMN);
-$stmt = $pdo->query("SELECT * FROM surat_disposisi_tindak_lanjut ORDER BY tanggal DESC");
+$stmt = $pdo->query("
+    SELECT tl.*,
+           d.note AS note_disposisi
+    FROM surat_disposisi_tindak_lanjut tl
+    LEFT JOIN surat_disposisi d
+      ON d.id = (
+        SELECT d2.id
+        FROM surat_disposisi d2
+        WHERE d2.no_surat = tl.no_surat
+        ORDER BY d2.id DESC
+        LIMIT 1
+      )
+    ORDER BY tl.tanggal DESC
+");
 $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -424,10 +493,49 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
 #tabelSuratDisposisiTindakLanjut th .no-export { 
   margin-top: 6px;
 }
-```
+/* Export dropdown */
+.export-dropdown{ position:relative; display:inline-block; }
+.export-toggle{ cursor:pointer; }
 
+/* Sembunyikan menu saat tidak open */
+.export-dropdown:not(.open) .export-menu{ display:none !important; }
+
+.export-menu{
+  position:absolute; top:110%; left:0;
+  min-width:220px; padding:8px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:10px;
+  box-shadow:0 12px 30px rgba(0,0,0,.12); z-index:1000;
+}
+
+.export-item{
+  display:block; width:100%; text-align:left;
+  padding:10px 12px; background:transparent; border:0; cursor:pointer;
+}
+.export-item:hover{ background:#f3f7ff; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
+
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
 </style>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -444,12 +552,21 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
-          <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
+          <i class="bx bxs-user-circle user-icon"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -509,8 +626,15 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <!-- Balok 1 -->
     <div class="balok-1">
-        <button type="button" class="btn-tambah" onclick="exportTableToExcel()">Export</button>
+      <div class="export-dropdown">
+        <button type="button" class="btn-tambah export-toggle">Export ▾</button>
+        <div class="export-menu">
+          <button type="button" class="export-item" onclick="exportTableToExcel(false)">Export All</button>
+          <button type="button" class="export-item" onclick="exportTableToExcel(true)">Export 3 Bulan Terakhir</button>
+        </div>
+      </div>
     </div>
+
 
     <!-- Balok 2: Search Bar -->
     <div class="balok-2">
@@ -545,6 +669,11 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
               </div>
             </th>
             <th>File</th>
+            <th>
+              Note
+              <div class="no-export">
+              </div>
+            </th>
             <th>Chat</th>
             <th>
               Disposisi Kepada
@@ -563,10 +692,17 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <tbody>
         <?php if (!empty($semuaData)): ?>
             <?php $no = 1; foreach ($semuaData as $row): ?>
+                <?php
+                // tentukan note khusus untuk baris ini
+                $noteThisRow = ($row['note'] !== '' && $row['note'] !== null)
+                    ? $row['note']
+                    : ($row['note_disposisi'] ?? '');
+                ?>
                 <tr class="data-row"
                     data-tanggal="<?= htmlspecialchars($row['tanggal'] ?? '') ?>"
                     data-no_surat="<?= htmlspecialchars($row['no_surat'] ?? '') ?>"
                     data-disposisi_kepada="<?= htmlspecialchars($row['disposisi_kepada'] ?? '') ?>"
+                    data-note="<?= htmlspecialchars($noteForAttr) ?>"    
                     data-id="<?= (int)$row['id_tindaklanjut'] ?>">
                     <td><?= $no++ ?></td>
                     <td><?= htmlspecialchars($row['tanggal'] ?? '') ?></td>
@@ -577,6 +713,31 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <?php else: ?>
                             -
                         <?php endif; ?>
+                    </td>
+                    <td style="min-width:220px;">
+                      <textarea
+                        id="note-view-<?= (int)$row['id_tindaklanjut'] ?>"
+                        class="note-view-td"
+                        readonly
+                        placeholder="..."
+                        style="width:100%; min-height:60px; resize:vertical; background:#fff;"
+                      ><?= htmlspecialchars($noteThisRow) ?></textarea>
+
+                      <div class="no-export" style="margin-top:6px;">
+                        <button
+                          type="button"
+                          style="padding:4px 8px; font-size:12px; border:1px solid #999; border-radius:4px; cursor:pointer;"
+                          onclick="editNoteTL(<?= (int)$row['id_tindaklanjut'] ?>)">
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          style="padding:4px 8px; font-size:12px; border:1px solid #28a745; color:#fff; background:#28a745; border-radius:4px; cursor:pointer; display:none;"
+                          id="save-note-btn-<?= (int)$row['id_tindaklanjut'] ?>"
+                          onclick="saveNoteTL(<?= (int)$row['id_tindaklanjut'] ?>)">
+                          Simpan
+                        </button>
+                      </div>
                     </td>
                     <td>
                       <?php if (!empty($row['disposisi_kepada'])): ?>
@@ -614,20 +775,9 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
                       </form>
                     </td>
                     <td>
-                        <a href="update_surat_disposisi_tindak_lanjut.php?id=<?= urlencode($row['id_tindaklanjut'] ?? '') ?>">✏️</a><br>
+                        <!-- <a href="update_surat_disposisi_tindak_lanjut.php?id=<?= urlencode($row['id_tindaklanjut'] ?? '') ?>">✏️</a><br> -->
                         <a href="surat_disposisi_tindak_lanjut.php?delete=<?= urlencode($row['id_tindaklanjut'] ?? '') ?>" onclick="return confirm('Hapus surat ini?')">🗑️</a>
                     </td>
-                </tr>
-                <tr id="chatbox-<?= $row['no_surat'] ?>" data-no-surat="<?= $row['no_surat'] ?>" style="display: none;">
-                    <td colspan="7">
-                        <div class="chat-box" data-no-surat="<?= $row['no_surat'] ?>"></div>
-                        <form class="form-chat" data-no-surat="<?= $row['no_surat'] ?>" method="POST">
-                          <input type="hidden" name="no_surat" value="<?= htmlspecialchars($row['no_surat']) ?>">
-                          <textarea name="pesan" placeholder="Ketik pesan..." required style="width:50%"></textarea>
-                          <button type="submit">Kirim</button>
-                        </form> 
-                    </td>
-                </tr>
             <?php endforeach; ?>
         <?php else: ?>
             <tr><td colspan="7">Data tidak ditemukan</td></tr>
@@ -680,7 +830,7 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script src="script.js"></script>
@@ -699,17 +849,23 @@ $semuaData = $stmt->fetchAll(PDO::FETCH_ASSOC);
       userMenu.style.display = "none";
     }
   });
+  </script>
+  <script>
+(() => {
+  const dd  = document.querySelector('.export-dropdown');
+  if (!dd) return;
+  const btn = dd.querySelector('.export-toggle');
+  if (!btn) return;
 
-function filterTable(attribute, value) {
-  const rows = document.querySelectorAll('.data-row');
-  rows.forEach(row => {
-    if (value === "" || row.dataset[attribute.toLowerCase()] === value) {
-      row.style.display = "table-row";
-    } else {
-      row.style.display = "none";
-    }
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dd.classList.toggle('open');
   });
-}
+  document.addEventListener('click', (e) => {
+    if (!dd.contains(e.target)) dd.classList.remove('open');
+  });
+})();
+
 
 
 function resetFilters() {
@@ -753,151 +909,6 @@ function searchTable() {
   if (input.length > 0) {
     resetContainer.style.display = "block";
   }
-}
-
-
-// function cssAttr(v){ return String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
-
-// function toggleChatBox(noSurat) {
-//   const row = document.querySelector(`tr[id^="chatbox-"][data-no-surat="${cssAttr(noSurat)}"]`);
-//   if (!row) return;
-//   const chatBox = row.querySelector('.chat-box');
-//   row.style.display = (row.style.display === 'none' || !row.style.display) ? '' : 'none';
-//   if (row.style.display !== 'none') {
-//     loadChat(noSurat, chatBox);
-//   }
-// }
-
-
-function loadChat(noSurat, container) {
-  const url = './pesan_lihat.php?ajax=1&no_surat=' + encodeURIComponent(noSurat);
-  container.innerHTML = '<div style="opacity:.6">Memuat percakapan...</div>';
-
-  fetch(url, {
-    credentials: 'same-origin',
-    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-  })
-    .then(async res => {
-      const text = await res.text();
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + text.slice(0, 200));
-      return text;
-    })
-  .then(html => {
-    if (html && html.trim()) {
-      container.innerHTML = '<div class="chat-container">' + html + '</div>';
-    } else {
-      container.innerHTML = '<div style="opacity:.6">Belum ada pesan.</div>';
-    }
-    container.scrollTop = container.scrollHeight;
-  })
-    .catch(err => {
-      container.innerHTML = '<div style="color:#b00020">Gagal memuat chat: ' + err.message + '</div>';
-    });
-}
-
-
-setInterval(function() {
-  document.querySelectorAll('[id^="chatbox-"]').forEach(function(chatbox) {
-    const noSurat = chatbox.dataset.noSurat;
-    const chatBoxDiv = chatbox.querySelector('.chat-box');
-    if (noSurat && chatBoxDiv && chatbox.style.display !== 'none') {
-      fetch(`pesan_lihat.php?ajax=1&no_surat=${encodeURIComponent(noSurat)}`)
-        .then(r => r.text())
-        .then(html => {
-          chatBoxDiv.innerHTML = html;
-          chatBoxDiv.scrollTop = chatBoxDiv.scrollHeight;
-        });
-    }
-  });
-}, 10000);
-
-
-function sendChat(e, noSurat) {
-    e.preventDefault();
-    const form = e.target;
-    const pesan = form.pesan.value;
-    const pengirim = form.pengirim.value;
-    
-    fetch('pesan_buat.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `no_surat=${encodeURIComponent(noSurat)}&pengirim=${encodeURIComponent(pengirim)}&pesan=${encodeURIComponent(pesan)}`
-    }).then(() => {
-        form.pesan.value = '';
-        loadChat(noSurat);
-    });
-}
-
-function initialChat() {
-    const noSurat = document.querySelector('input[name="no_surat"]').value;
-    const chatBox = document.getElementById('chat-box');
-    fetch('pesan_lihat.php?no_surat=' + noSurat)
-        .then(res => res.text())
-        .then(data => {
-            chatBox.innerHTML = data;
-            chatBox.scrollTop = chatBox.scrollHeight;
-        });
-}
-
-document.querySelectorAll('.form-chat').forEach(form => {
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-
-        const formData = new FormData(form);
-        const noSurat = form.dataset.noSurat;
-        const chatBox = form.closest('tr').querySelector('.chat-box');
-
-        fetch('pesan_buat.php', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.text())
-        .then(() => {
-            form.reset();
-            loadChat(noSurat, chatBox);
-        });
-    });
-});
-
-
-function editPesan(idPesan, isiLama) {
-    const pesanBaru = prompt("Edit pesan:", isiLama);
-    if (pesanBaru && pesanBaru !== isiLama) {
-        fetch("pesan_edit.php", {
-            method: "POST",
-            headers: {"Content-Type": "application/x-www-form-urlencoded"},
-            body: "id_pesan=" + encodeURIComponent(idPesan) +
-                  "&pesan_baru=" + encodeURIComponent(pesanBaru)
-        })
-        .then(res => res.text())
-        .then(msg => {
-            if (msg.toLowerCase().includes("berhasil")) {
-                alert("Pesan berhasil diedit");
-                // kalau mau refresh chat box, panggil ulang loadChat() di sini
-            } else {
-                alert("Gagal mengedit pesan: " + msg);
-            }
-        })
-        .catch(err => {
-            alert("Terjadi kesalahan: " + err);
-        });
-    }
-}
-
-
-
-function toggleDropdown(selectElement, rowId) {
-    const lainnyaContainer = document.getElementById('lainnya-container-' + rowId);
-    const inputLain = document.getElementById('disposisi_kepada_lain-' + rowId);
-
-    if (selectElement.value === 'lain') {
-        lainnyaContainer.style.display = 'block';
-        inputLain.setAttribute('required', 'required');
-    } else {
-        lainnyaContainer.style.display = 'none';
-        inputLain.removeAttribute('required');
-        inputLain.value = '';
-    }
 }
 
 function setDisposisi(selectElement, rowId) {
@@ -1101,76 +1112,82 @@ function toggleChatBoxFromBtn(btn) {
 }
   </script>  
 <script>
-  window.exportTableToExcel = function () {
+window.exportTableToExcel = function (last3Months) {
   if (typeof XLSX === 'undefined') {
-    alert('Library XLSX belum dimuat. Pastikan xlsx.full.min.js sudah di-include.');
-    return;
+    alert('Library XLSX belum dimuat.'); return;
+  }
+  const src = document.getElementById('tabelSuratDisposisiTindakLanjut');
+  if (!src) { alert('Tabel tidak ditemukan.'); return; }
+
+  // clone agar aman dimodifikasi
+  const table = src.cloneNode(true);
+
+  // 1) Hilangkan elemen interaktif dari salinan (header filter/select/button)
+  table.querySelectorAll('.no-export, select, form, button').forEach(el => el.remove());
+
+  // 2) Pertahankan hanya baris yang SEDANG TAMPIL (mengikuti filter/search user)
+  const origRows  = Array.from(src.querySelectorAll('tbody tr.data-row'));
+  const cloneRows = Array.from(table.querySelectorAll('tbody tr.data-row'));
+  cloneRows.forEach((tr, i) => {
+    const hidden = window.getComputedStyle(origRows[i]).display === 'none';
+    if (hidden) tr.remove();
+  });
+
+  // 3) Jika mode "3 Bulan Terakhir", filter lagi berdasarkan atribut tanggal
+  const dateAttr = 'tanggal'; // gunakan data-tanggal di <tr>
+  function parseFlexibleDate(str){
+    if (!str) return null;
+    str = String(str).trim();
+    if (str.length >= 10) str = str.slice(0,10);
+    // YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const [y,m,d] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d); return isNaN(dt) ? null : dt;
+    }
+    // DD-MM-YYYY
+    if (/^\d{2}-\d{2}-\d{4}$/.test(str)) {
+      const [d,m,y] = str.split('-').map(Number);
+      const dt = new Date(y, m-1, d); return isNaN(dt) ? null : dt;
+    }
+    return null;
+  }
+  if (last3Months) {
+    const today = new Date();
+    const start = new Date(today.getTime() - 90*24*60*60*1000);
+    const end   = today;
+
+    table.querySelectorAll('tbody tr.data-row').forEach(tr => {
+      const raw = tr.getAttribute('data-' + dateAttr) || '';
+      const dt  = parseFlexibleDate(raw);
+      if (!dt || dt < start || dt > end) tr.remove();
+    });
   }
 
-  const table = document.getElementById('tabelSuratDisposisiTindakLanjut');
-  if (!table) { alert('Tabel tidak ditemukan.'); return; }
+  // 4) Hapus kolom "File", "Chat", "Aksi" dari hasil export
+  const headerRow = table.querySelector('thead tr') || table.querySelector('tr');
+  const ths = Array.from(headerRow.children);
+  const removeIdx = ths
+    .map((th, i) => [ (th.textContent||'').trim().split('\n')[0], i ])
+    .filter(([t]) => ['File','Chat','Aksi'].includes(t))
+    .map(([, i]) => i);
 
-  const headerRow = table.querySelector('thead tr');
-  if (!headerRow) { alert('Header tabel tidak ditemukan.'); return; }
-  const ths = Array.from(headerRow.querySelectorAll('th'));
-
-  const removeIdx = [];
-  const headers = [];
-
-  ths.forEach((th, idx) => {
-    const label = (th.childNodes[0]?.textContent || th.textContent || '').trim();
-    if (['File', 'Chat', 'Aksi'].includes(label)) {
-      removeIdx.push(idx);
-    } else {
-      headers.push(label);
-    }
+  table.querySelectorAll('tr').forEach(tr => {
+    Array.from(tr.children).forEach((td, i) => { if (removeIdx.includes(i)) td.remove(); });
   });
 
-  const disposisiIdx = ths.findIndex(
-    th => (th.textContent || '').trim().toLowerCase() === 'disposisi kepada'
-  );
+  // 5) Buat workbook dari tabel
+  const wb = XLSX.utils.table_to_book(table, { sheet: 'Disposisi Tindak Lanjut' });
+  const ws = wb.Sheets['Disposisi Tindak Lanjut'];
 
-  const bodyRows = Array.from(table.querySelectorAll('tbody tr.data-row'));
-  const visibleRows = bodyRows.filter(tr => window.getComputedStyle(tr).display !== 'none');
+  // Lebar kolom kira-kira (berdasar panjang header)
+  const firstRow = XLSX.utils.sheet_to_json(ws, { header: 1 })[0] || [];
+  ws['!cols'] = firstRow.map(h => ({ wch: Math.min(Math.max(String(h||'').length + 2, 12), 40) }));
 
-  const data = [];
-  visibleRows.forEach(tr => {
-    const tds = Array.from(tr.querySelectorAll('td'));
-    const row = [];
+  XLSX.writeFile(wb, `surat_disposisi_tindak_lanjut_${last3Months ? '3bulan' : 'all'}.xlsx`);
 
-    tds.forEach((td, idx) => {
-      if (removeIdx.includes(idx)) return;
-
-      let text;
-      if (idx === disposisiIdx) {
-        const shown = td.querySelector('div, span');
-        text = (shown?.textContent || td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
-      } else {
-        text = (td.textContent || '').replace(/\s+\n|\n+\s+/g, ' ').trim();
-      }
-
-      row.push(text);
-    });
-
-    if (row.some(v => v !== '')) data.push(row);
-  });
-
-  const aoa = [headers, ...data];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-  ws['!cols'] = [
-    { wch: 6 },   // No
-    { wch: 14 },  // Tanggal
-    { wch: 22 },  // No Surat
-    { wch: 50 },  // Disposisi Kepada
-  ].slice(0, headers.length);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'surat disposisi tindak lanjut');
-  XLSX.writeFile(wb, 'surat_disposisi_tindak_lanjut.xlsx');
-
-  alert('Data berhasil diekspor!');
+  document.querySelector('.export-dropdown')?.classList.remove('open');
 };
+
 
 function showTLReset(){
   const hasDate = !!document.getElementById('flt-tanggal-tl')?.value;
@@ -1225,6 +1242,88 @@ function resetFilters(){
 document.addEventListener('DOMContentLoaded', () => {
   showTLReset();
 });
+</script>
+<script>
+// buat textarea bisa diedit
+function editNoteTL(idTL){
+  const ta   = document.getElementById('note-view-' + idTL);
+  const save = document.getElementById('save-note-btn-' + idTL);
+  if (!ta || !save) return;
+
+  ta.removeAttribute('readonly');
+  ta.style.background = '#fffbe6'; // kasih highlight kuning muda biar kelihatan sedang edit
+  ta.focus();
+
+  save.style.display = 'inline-block';
+}
+
+// simpan via fetch POST
+function saveNoteTL(idTL){
+  const ta   = document.getElementById('note-view-' + idTL);
+  const save = document.getElementById('save-note-btn-' + idTL);
+  if (!ta) return;
+
+  const valNote = ta.value;
+
+  fetch('surat_disposisi_tindak_lanjut.php', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: 'save_note_tl=1'
+        + '&id_tindaklanjut=' + encodeURIComponent(idTL)
+        + '&note=' + encodeURIComponent(valNote)
+  })
+  .then(res => res.text())
+  .then(txt => {
+    const clean = txt.replace(/^\uFEFF/, '').trim().toLowerCase();
+    if (clean.startsWith('ok')) {
+      // sukses
+      ta.setAttribute('readonly','readonly');
+      ta.style.background = '#fff';
+
+      if (save) save.style.display = 'none';
+
+      // update semua baris kembar (same no_surat) di DOM
+      // biar UI konsisten tanpa reload
+      // cari parent tr buat ambil no_surat
+      const tr = ta.closest('tr.data-row');
+      if (tr) {
+        const noSurat = tr.getAttribute('data-no_surat') || '';
+        document.querySelectorAll('#tabelSuratDisposisiTindakLanjut .data-row')
+          .forEach(r => {
+            if ((r.getAttribute('data-no_surat')||'') === noSurat) {
+              r.setAttribute('data-note', valNote);
+              const otherTa = r.querySelector('textarea.note-view-td');
+              const otherSave = r.querySelector('[id^="save-note-btn-"]');
+              if (otherTa) {
+                otherTa.value = valNote;
+                otherTa.setAttribute('readonly','readonly');
+                otherTa.style.background = '#fff';
+              }
+              if (otherSave) {
+                otherSave.style.display = 'none';
+              }
+            }
+          });
+      }
+
+      alert('Note tersimpan.');
+    } else if (clean.startsWith('error')) {
+      alert('Gagal menyimpan note: ' + txt);
+    } else if (clean === 'invalid') {
+      alert('Data tidak valid.');
+    } else {
+      // fallback
+      alert('Respon tidak dikenal: ' + txt);
+    }
+  })
+  .catch(err => {
+    alert('Kesalahan jaringan: ' + err.message);
+  });
+}
 </script>
 </body>
 </html>

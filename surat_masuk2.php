@@ -2,7 +2,30 @@
 session_start();
 include 'config.php';
 
-// Cek login
+// helper aman untuk HTML
+function h(?string $s): string {
+    return htmlspecialchars($s ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_note'], $_POST['id'])) {
+    header('Content-Type: text/plain; charset=utf-8');   // <-- supaya fetch tidak dapat HTML
+
+    $id   = (int)($_POST['id'] ?? 0);
+    $note = trim(substr($_POST['note'] ?? '', 0, 255));  // <-- pakai 'note' huruf kecil
+
+    if ($id > 0) {
+        $stmt = $pdo->prepare("UPDATE surat_masuk SET note = :note WHERE id = :id");
+        $ok   = $stmt->execute(['note' => $note, 'id' => $id]);
+        echo $ok ? 'ok' : 'error';
+    } else {
+        echo 'invalid';
+    }
+    exit(); // <-- WAJIB: hentikan eksekusi agar tidak kirim HTML di bawah
+}
+
+/* ============================================================
+   2) Cek login
+   ============================================================ */
 if (!isset($_SESSION['user'])) {
     header('Location: login.php');
     exit();
@@ -10,11 +33,45 @@ if (!isset($_SESSION['user'])) {
 
 $user = $_SESSION['user'];
 $role = $user['status'] ?? null;
-$can_access_eoffice = in_array($role, ['Sekretariat', 'Super Admin']);
+$eofficeAll = [
+  'surat_masuk.php'                   => 'Surat Masuk',
+  'surat_keluar.php'                  => 'Surat Keluar',
+  'surat_disposisi_pengajuan.php'     => 'Disposisi Pengajuan',
+  'surat_disposisi.php'               => 'Disposisi Surat',
+  'surat_disposisi_tindak_lanjut.php' => 'Disposisi Tindak Lanjut',
+  'surat_notif.php'                   => 'Surat Notif',
+  'surat_pengajuan.php'               => 'Pengajuan',
+];
 
-// Hapus surat
+$rolePages = [
+  'Super Admin' => array_keys($eofficeAll), // semua
+  'Sekretariat' => [
+    'surat_masuk.php',
+    'surat_keluar.php',
+    'surat_disposisi_pengajuan.php',
+  ],
+  'Direktur' => [
+    'surat_disposisi.php',
+    'surat_notif.php',
+  ],
+  'Admin' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+  'Member' => [
+    'surat_notif.php',
+    'surat_pengajuan.php',
+  ],
+];
+
+// Tentukan halaman yang boleh tampil untuk role saat ini
+$allowedEofficePages = $rolePages[$role] ?? [];
+$can_access_eoffice  = !empty($allowedEofficePages);
+/* ============================================================
+   3) Hapus surat
+   ============================================================ */
 if (isset($_GET['delete'])) {
-    $id = $_GET['delete'];
+    $id = (int)$_GET['delete'];
     $stmt = $pdo->prepare("DELETE FROM surat_masuk WHERE id = :id");
     $stmt->execute(['id' => $id]);
     $_SESSION['success_message'] = "Surat berhasil dihapus.";
@@ -22,7 +79,9 @@ if (isset($_GET['delete'])) {
     exit();
 }
 
-// Simpan surat masuk baru
+/* ============================================================
+   4) Simpan surat masuk baru (upload)
+   ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     $tanggal_surat = $_POST['tanggal_surat'] ?? '';
     $tanggal_diterima = date('Y-m-d'); // Otomatis isi di sini saat upload
@@ -32,6 +91,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     $dari = trim($_POST['dari'] ?? '');
     $instruksi = trim($_POST['instruksi'] ?? '');
     $keterangan = trim($_POST['keterangan'] ?? '');
+    $note = trim($_POST['note'] ?? '');
     $disposisi_kepada = trim($_POST['disposisi_kepada'] ?? '');
 
     if (!empty($disposisi_kepada)) {
@@ -61,18 +121,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
             if (move_uploaded_file($_FILES['file_url']['tmp_name'], $file_path)) {
                 // INSERT ke surat_masuk
                 $stmt = $pdo->prepare("INSERT INTO surat_masuk 
-                    (tanggal_surat, tanggal_diterima, no_surat, no_agenda, perihal, dari, keterangan, disposisi_kepada, file_url) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                  (tanggal_surat, tanggal_diterima, no_surat, no_agenda, perihal, dari, keterangan, note, disposisi_kepada, file_url) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([
-                    $tanggal_surat,
-                    $tanggal_diterima, // otomatis
-                    $no_surat,
-                    $no_agenda,
-                    $perihal,
-                    $dari,
-                    $keterangan,
-                    $disposisi_kepada,
-                    $file_name
+                  $tanggal_surat,
+                  $tanggal_diterima,
+                  $no_surat,
+                  $no_agenda,
+                  $perihal,
+                  $dari,
+                  $keterangan,
+                  $note,                 // simpan note awal jika ada
+                  $disposisi_kepada,
+                  $file_name
                 ]);
 
                 // Auto insert ke surat_disposisi
@@ -103,32 +164,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_surat'])) {
     }
 }
 
-// Ambil semua data surat_masuk
+/* ============================================================
+   5) Ambil data & data dropdown
+   ============================================================ */
 $stmt = $pdo->query("SELECT * FROM surat_masuk ORDER BY id DESC");
 $suratList = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $result = $suratList;
 
-// Ambil data unik untuk dropdown
 function getDropdownData($pdo, $column) {
     $stmt = $pdo->prepare("SELECT DISTINCT $column FROM surat_masuk ORDER BY $column ASC");
     $stmt->execute();
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$noSuratData = getDropdownData($pdo, 'no_surat');
-$noAgendaData = getDropdownData($pdo, 'no_agenda');
-$perihalData = getDropdownData($pdo, 'perihal');
-$dariData = getDropdownData($pdo, 'dari');
-$keteranganData = getDropdownData($pdo, 'keterangan');
+$noSuratData     = getDropdownData($pdo, 'no_surat');
+$noAgendaData    = getDropdownData($pdo, 'no_agenda');
+$perihalData     = getDropdownData($pdo, 'perihal');
+$dariData        = getDropdownData($pdo, 'dari');
+$keteranganData  = getDropdownData($pdo, 'keterangan');
+$noteData        = getDropdownData($pdo, 'note');
+$instruksiData = getDropdownData($pdo, 'instruksi');
 
-// Proses update disposisi_kepada dan tanggal_disposisi jika dikirim dari form
+
+/* ============================================================
+   6) Update disposisi_kepada + tanggal_disposisi
+   ============================================================ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) {
     $id = $_POST['id'] ?? null;
     $disposisi_kepada = $_POST['disposisi_kepada'] ?? null;
     $tanggal_disposisi = $_POST['tanggal_disposisi'] ?? date('Y-m-d');
 
     if ($id && $disposisi_kepada) {
-        // Update surat_masuk
         $stmt = $pdo->prepare("UPDATE surat_masuk 
                                SET disposisi_kepada = :disposisi_kepada, 
                                    tanggal_disposisi = :tanggal_disposisi 
@@ -139,30 +205,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             'id' => $id
         ]);
 
-        // 🔔 Insert ke notif_surat
+        // ambil data utk insert notif + redirect dengan no_surat
         $stmtGet = $pdo->prepare("SELECT no_surat, file_url FROM surat_masuk WHERE id = ?");
         $stmtGet->execute([$id]);
         $row = $stmtGet->fetch(PDO::FETCH_ASSOC);
 
         if ($row) {
-            $stmtNotif = $pdo->prepare("INSERT INTO surat_notif 
-                (tanggal, no_surat, file_url, waktu) 
-                VALUES (:tanggal, :no_surat, :file_url, NOW())");
-
+            $stmtNotif = $pdo->prepare("
+                INSERT INTO surat_notif (tanggal, no_surat, file_url, waktu) 
+                VALUES (:tanggal, :no_surat, :file_url, NOW())
+            ");
             $stmtNotif->execute([
-                'tanggal' => date('Y-m-d'),
+                'tanggal'  => date('Y-m-d'),
                 'no_surat' => $row['no_surat'],
                 'file_url' => $row['file_url'],
             ]);
         }
 
+        // <-- ARAHKAN KE HALAMAN NOTIF
+        $_SESSION['success_message'] = "Disposisi diperbarui & notifikasi dibuat.";
+        $qs_no = urlencode($row['no_surat'] ?? '');
         header("Location: surat_masuk.php");
         exit();
     }
 }
+
+$jumlahNotif = (int)$pdo->query("SELECT COUNT(*) FROM notifikasi")->fetchColumn();
 ?>
-
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -392,11 +461,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
 }
 .export-item:hover { background:#f2f6ff; }
 .export-dropdown.open .export-menu { display:block; }
+.notif-bell{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin: 0 12px;
+  font-size: 28px;       /* ukuran ikon */
+  color: white;          /* samakan dengan tema navbar */
+  text-decoration: none;
+}
+.notif-bell:hover{ opacity:.85; }
 
+/* (opsional) badge jumlah notif */
+.notif-bell .badge{
+  position:absolute;
+  top:13px; right:64px;
+  min-width:18px; height:18px;
+  padding:0 5px;
+  border-radius:999px;
+  background:#ff3b30; color:#fff;
+  font-size:12px; line-height:18px;
+}
   </style>
 <script defer src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+  <?= impersonation_banner_html(); ?>
   <!-- Latar Belakang -->
   <div class="background-fade"></div>
   <!-- Konten Utama -->
@@ -413,12 +503,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
     <div class="top-buttons">
       <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
         <a href="sub_beranda.php" class="jelajahi-portal">Layanan</a>
+        <a href="notifikasi.php" class="notif-bell" title="Notifikasi">
+          <i class='bx bxs-bell'></i>
+          <?php if ($jumlahNotif > 0): ?>
+            <span class="badge"><?= $jumlahNotif ?></span>
+          <?php endif; ?>
+        </a>
       <?php endif; ?>
       <?php if (isset($_SESSION['user'])): ?>
         <div class="user-dropdown">
           <i class="bx bxs-user-circle user-icon" onclick="toggleUserDropdown()"></i>
           <div class="user-menu" id="userMenu">
             <a href="profil.php">Profil</a>
+            <?php if ($role === 'Super Admin'): ?>
+              <a href="users.php">Data User</a>
+            <?php endif; ?>
             <a href="logout.php">Logout</a>
           </div>
         </div>
@@ -449,19 +548,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
         <?php endif; ?>
         <!-- <li><a href="masukan.php" class="fitur-nav">Masukan</a></li> -->
         <?php if ($can_access_eoffice): ?>
-        <li class="dropdown">
-          <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
-          <div class="dropdown-content">
-            <a href="surat_masuk.php">Surat Masuk</a>
-            <a href="surat_keluar.php">Surat Keluar</a>
-            <a href="surat_disposisi_pengajuan.php">Disposisi Pengajuan</a>
-            <a href="surat_disposisi.php">Disposisi Surat</a>
-            <a href="surat_disposisi_tindak_lanjut.php">Disposisi Tindak Lanjut</a>
-            <a href="surat_notif.php">Surat Notif</a>          
-            <a href="surat_pengajuan.php">Pengajuan</a>          
-            <!-- <a href="surat_internal.php">Surat Internal</a>           -->
-          </div>
-        </li>
+          <li class="dropdown">
+            <a class="fitur-nav" href="javascript:void(0);">E-Office</a>
+            <div class="dropdown-content">
+              <?php foreach ($allowedEofficePages as $href): ?>
+                <a href="<?= $href ?>"><?= $eofficeAll[$href] ?></a>
+              <?php endforeach; ?>
+            </div>
+          </li>
         <?php endif; ?>
         <?php if (in_array($role, ['Super Admin', 'Admin', 'Sekretariat', 'Member', 'Direktur'])): ?>
           <li><a href="artikel.php" class="fitur-nav">Artikel</a></li>
@@ -578,7 +672,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                     </select>
                 </div>
             </th>
-
             <th>
                 Keterangan
                 <div class="no-export">
@@ -593,6 +686,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
                         <?php endif; ?>
                     </select>
                 </div>
+            </th>
+            <th>
+              Note
+              <div class="no-export">
+                <select onchange="applyAllFilters('note', this.value); showResetButton();">
+                  <option value=""></option>
+                  <?php if (!empty($noteData)): ?>
+                    <?php foreach ($noteData as $rowNote): ?>
+                      <option value="<?= $rowNote['note'] ?>"><?= $rowNote['note'] ?></option>
+                    <?php endforeach; ?>
+                  <?php else: ?>
+                    <option disabled>Tidak ada data.</option>
+                  <?php endif; ?>
+                </select>
+              </div>
             </th>
             <th>
                 Disposisi
@@ -676,6 +784,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             data-perihal="<?= $row['perihal'] ?>"
             data-dari="<?= $row['dari'] ?>"
             data-keterangan="<?= $row['keterangan'] ?>"
+            data-note="<?= $row['note'] ?>"
             data-instruksi="<?= $row['instruksi'] ?>"
             data-disposisi_kepada="<?= $row['disposisi_kepada'] ?>"
             data-file="<?= $row['file_url'] ?>">
@@ -691,7 +800,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
             <td><?= $row['no_agenda'] ?></td>
             <td><?= $row['perihal'] ?></td>
             <td><?= $row['dari'] ?></td>
-            <td><?= $row['keterangan'] ?></td>
+            <td><?= $row['keterangan'] ?></td>            
+            <td>
+              <textarea
+                class="note-view"
+                readonly
+                style="width:220px; min-height:60px; resize:vertical; background:#fff;"
+              ><?= h($row['note'] ?? '') ?></textarea>
+            </td>
             <td><?= $row['instruksi'] ?></td>
             <td>
             <div style="margin-bottom: 5px;">
@@ -768,25 +884,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_disposisi'])) 
   </footer>
   <footer>
     <div class="footer-bottom">
-      <p>© Copyright Humas Marketing Citra Husada.</p>
+      <p>© Copyright IT Support Citra Husada.</p>
     </div>
   </footer>
   <script defer src="script.js"></script>
   <script>
-  // ============ User menu (dibungkus supaya tidak bentrok nama variabel global) ============
-  (function(){
-    const userIconEl = document.querySelector(".user-icon");
-    const userMenuEl = document.getElementById("userMenu");
-    if (userIconEl && userMenuEl) {
-      userIconEl.addEventListener("click", function (e) {
-        e.stopPropagation();
-        userMenuEl.style.display = (userMenuEl.style.display === "block") ? "none" : "block";
-      });
-      document.addEventListener("click", function (e) {
-        if (!userIconEl.contains(e.target)) userMenuEl.style.display = "none";
-      });
+  const userIcon = document.querySelector(".user-icon");
+  const userMenu = document.getElementById("userMenu");
+  if (userIcon) {
+    userIcon.addEventListener("click", function (e) {
+      e.stopPropagation();
+      userMenu.style.display = userMenu.style.display === "block" ? "none" : "block";
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    if (userMenu && !userIcon.contains(e.target)) {
+      userMenu.style.display = "none";
     }
-  })();
+  });
 
   function showResetButton() {
     const resetContainer = document.getElementById("reset-container");
@@ -849,8 +965,8 @@ window.exportTableToExcel = function (last3Months) {
   if (last3Months) {
     // --- Mode rolling 90 hari (paling aman & intuitif) ---
     const today = new Date();
-    const start = new Date(today.getTime() - 90*24*60*60*1000);
-    const end   = today;
+    const end   = new Date(today.getFullYear(), today.getMonth()+1, 0); // akhir bulan ini
+    const start = new Date(today.getFullYear(), today.getMonth()-2, 1); // awal 2 bulan lalu
 
     // // --- Kalau mau 3 bulan kalender, pakai ini:
     // const end   = new Date(today.getFullYear(), today.getMonth()+1, 0); // akhir bulan ini
@@ -923,7 +1039,8 @@ window.exportTableToExcel = function (last3Months) {
       perihal: getSelectValue('Perihal'),
       dari: getSelectValue('Dari'),
       keterangan: getSelectValue('Keterangan'),
-      instruksi: getSelectValue('Disposisi'),
+      note: getSelectValue('Note'),
+      instruksi: getSelectValue('instruksi'),
       disposisi_kepada: (document.getElementById('select-disposisi-kepada')?.value || '').toLowerCase() // <- pakai id khusus
     };
 
@@ -977,6 +1094,26 @@ document.addEventListener('DOMContentLoaded', () => {
   showResetButton();
 });
 
+// function saveKet(id, note) {
+//   fetch('surat_masuk.php', {
+//     method: 'POST',
+//     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+//     body: `save_note=1&id=${encodeURIComponent(id)}&note=${encodeURIComponent(note || '')}`
+//   })
+//   .then(r => r.text())
+//   .then(t => {
+//     const clean = t.replace(/<[^>]*>/g, '').trim().toLowerCase();
+//     if (clean === 'ok' || clean === 'success') return;
+//     throw new Error(clean || 'unknown');
+//   })
+//   .catch(err => alert('Gagal menyimpan note: ' + err.message));
+// }
+
+
   </script>
 </body>
 </html>
+
+
+
+
